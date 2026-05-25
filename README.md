@@ -7,6 +7,7 @@ A lightweight Telegram-based remote shell for Linux. It provides a persistent `b
 - Persistent shell session using `pexpect`
 - Run Linux commands directly from Telegram
 - Live output updates in the same Telegram message
+- Large command outputs are sent automatically as `.txt` files
 - Interactive controls such as Ctrl+C, Ctrl+D, Ctrl+Z, Enter, Tab, arrows, Esc, Backspace and Delete
 - Upload files from Telegram to the server
 - Download files from the server to Telegram
@@ -86,6 +87,9 @@ Editor commands:
 
 - `$help`
 - `$status`
+- `$tail`
+- `$tail 200`
+- `$tail full`
 - `$restart-shell`
 
 ## Installation
