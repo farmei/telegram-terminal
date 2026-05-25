@@ -40,7 +40,9 @@ current_msg = None
 current_event = None
 
 output_buffer = ""
+raw_output_buffer = ""
 command_output_buffer = ""
+raw_command_output_buffer = ""
 output_revision = 0
 
 editor_state = None
@@ -261,6 +263,7 @@ def write_command_log(command, content, path):
 def reset_runtime_state():
     global current_msg
     global current_event
+    global raw_command_output_buffer
     global command_output_buffer
     global output_revision
     global current_log_path
@@ -273,6 +276,7 @@ def reset_runtime_state():
 
     current_msg = None
     current_event = None
+    raw_command_output_buffer = ""
     command_output_buffer = ""
     current_log_path = None
     current_output_mode = "chat"
@@ -317,12 +321,131 @@ def text_metrics(font):
     return width, height
 
 
+ANSI_SGR_RE = re.compile(r'\x1b\[([0-9;]*)m')
+
+ANSI_BASE_COLORS = {
+    30: (0, 0, 0),
+    31: (205, 49, 49),
+    32: (13, 188, 121),
+    33: (229, 229, 16),
+    34: (36, 114, 200),
+    35: (188, 63, 188),
+    36: (17, 168, 205),
+    37: (229, 229, 229),
+}
+
+ANSI_BRIGHT_COLORS = {
+    90: (102, 102, 102),
+    91: (241, 76, 76),
+    92: (35, 209, 139),
+    93: (245, 245, 67),
+    94: (59, 142, 234),
+    95: (214, 112, 214),
+    96: (41, 184, 219),
+    97: (255, 255, 255),
+}
+
+
+def xterm_color(index):
+    index = max(0, min(255, int(index)))
+
+    if index < 16:
+        palette = [
+            (0, 0, 0), (205, 49, 49), (13, 188, 121), (229, 229, 16),
+            (36, 114, 200), (188, 63, 188), (17, 168, 205), (229, 229, 229),
+            (102, 102, 102), (241, 76, 76), (35, 209, 139), (245, 245, 67),
+            (59, 142, 234), (214, 112, 214), (41, 184, 219), (255, 255, 255),
+        ]
+        return palette[index]
+
+    if 16 <= index <= 231:
+        index -= 16
+        r = index // 36
+        g = (index % 36) // 6
+        b = index % 6
+        steps = [0, 95, 135, 175, 215, 255]
+        return (steps[r], steps[g], steps[b])
+
+    shade = 8 + (index - 232) * 10
+    return (shade, shade, shade)
+
+
+def parse_ansi_color_segments(text, default_color):
+    text = text.replace("\r", "")
+    segments = []
+    current_color = default_color
+    idx = 0
+
+    def append_chunk(chunk):
+        if chunk:
+            segments.append((chunk, current_color))
+
+    for match in ansi_escape.finditer(text):
+        chunk = text[idx:match.start()]
+        append_chunk(chunk)
+
+        sequence = match.group(0)
+        if sequence.endswith("m") and sequence.startswith("\x1b["):
+            codes_text = sequence[2:-1]
+            codes = [int(code) for code in codes_text.split(";") if code] if codes_text else [0]
+            i = 0
+
+            while i < len(codes):
+                code = codes[i]
+
+                if code == 0 or code == 39:
+                    current_color = default_color
+                elif 30 <= code <= 37:
+                    current_color = ANSI_BASE_COLORS.get(code, default_color)
+                elif 90 <= code <= 97:
+                    current_color = ANSI_BRIGHT_COLORS.get(code, default_color)
+                elif code in (38, 48) and i + 1 < len(codes):
+                    mode = codes[i + 1]
+                    if mode == 5 and i + 2 < len(codes):
+                        value = codes[i + 2]
+                        if code == 38:
+                            current_color = xterm_color(value)
+                        i += 2
+                    elif mode == 2 and i + 4 < len(codes):
+                        r, g, b = codes[i + 2:i + 5]
+                        if code == 38:
+                            current_color = (r, g, b)
+                        i += 4
+                i += 1
+
+        idx = match.end()
+
+    append_chunk(text[idx:])
+
+    if not segments:
+        return [(text, default_color)]
+
+    return segments
+
+
+def clip_segments(segments, max_cols):
+    clipped = []
+    visible = 0
+
+    for piece, color in segments:
+        if visible >= max_cols:
+            break
+
+        remaining = max_cols - visible
+        text = piece[:remaining]
+        if text:
+            clipped.append((text, color))
+            visible += len(text)
+
+    return clipped
+
+
 async def send_terminal_screenshot(event, content, wide=False, save_path=None):
     if not content.strip():
         content = "Output buffer is empty."
 
     theme = SHOT_THEMES.get(shot_theme, SHOT_THEMES["green"])
-    content = clean_output(content).replace("\r", "")
+    content = content.replace("\r", "")
 
     if wide:
         max_lines = 54
@@ -344,7 +467,14 @@ async def send_terminal_screenshot(event, content, wide=False, save_path=None):
     height = pad_top + max_lines * cell_height + pad_bottom
 
     lines = content.splitlines()[-max_lines:]
-    lines = [line[:max_cols] for line in lines]
+    rendered_lines = []
+    has_color = False
+
+    for line in lines:
+        segments = clip_segments(parse_ansi_color_segments(line, theme["text"]), max_cols)
+        if any(color != theme["text"] for _, color in segments):
+            has_color = True
+        rendered_lines.append(segments)
 
     image = Image.new("RGB", (width, height), theme["bg"])
     draw = ImageDraw.Draw(image)
@@ -357,8 +487,11 @@ async def send_terminal_screenshot(event, content, wide=False, save_path=None):
 
     y = pad_top
 
-    for line in lines:
-        draw.text((pad_x, y), line, fill=theme["text"], font=font)
+    for segments in rendered_lines:
+        x = pad_x
+        for piece, color in segments:
+            draw.text((x, y), piece, fill=color, font=font)
+            x += cell_width * len(piece)
         y += cell_height
 
     if save_path:
@@ -368,10 +501,12 @@ async def send_terminal_screenshot(event, content, wide=False, save_path=None):
         await event.reply(f"Terminal screenshot saved: {image_path}", file=str(image_path))
         return
 
+    caption = "Terminal screenshot with color:" if has_color else "Terminal screenshot:"
+
     with tempfile.TemporaryDirectory() as tmp_dir:
         image_path = Path(tmp_dir) / "telegram-terminal.png"
         image.save(image_path, "PNG")
-        await event.reply("Terminal screenshot:", file=str(image_path))
+        await event.reply(caption, file=str(image_path))
 
 
 async def handle_editor_command(event, command):
@@ -724,7 +859,9 @@ async def stream_shell_output():
     global current_msg
     global current_event
     global output_buffer
+    global raw_output_buffer
     global command_output_buffer
+    global raw_command_output_buffer
     global output_revision
     global current_output_mode
     global current_output_no_session
@@ -757,26 +894,26 @@ async def stream_shell_output():
 
                 if data:
 
-                    cleaned = clean_output(data)
-
+                    raw_data = data
                     command_finished = False
 
-                    if DONE_MARKER in cleaned:
-
-                        cleaned = cleaned.replace(
-                            DONE_MARKER,
-                            ""
-                        )
-
+                    if DONE_MARKER in raw_data:
+                        raw_data = raw_data.replace(DONE_MARKER, "")
                         command_finished = True
+
+                    cleaned = clean_output(raw_data)
 
                     if not current_output_no_session:
                         output_buffer += cleaned
+                        raw_output_buffer += raw_data
 
                     command_output_buffer += cleaned
+                    raw_command_output_buffer += raw_data
 
                     output_buffer = output_buffer[-MAX_BUFFER_SIZE:]
+                    raw_output_buffer = raw_output_buffer[-MAX_BUFFER_SIZE:]
                     command_output_buffer = command_output_buffer[-MAX_BUFFER_SIZE:]
+                    raw_command_output_buffer = raw_command_output_buffer[-MAX_BUFFER_SIZE:]
 
                     now = time.time()
                     current_command_last_activity = now
@@ -796,7 +933,7 @@ async def stream_shell_output():
                                     target_event = current_event or current_msg
                                     await send_terminal_screenshot(
                                         target_event,
-                                        command_output_buffer,
+                                        raw_command_output_buffer,
                                         save_path=current_shot_save_path,
                                     )
 
@@ -816,6 +953,7 @@ async def stream_shell_output():
                                     current_msg = None
                                     current_event = None
                                     command_output_buffer = ""
+                                    raw_command_output_buffer = ""
                                     current_command_started_at = None
                                     current_command_last_activity = None
                                     last_text = trimmed
@@ -851,6 +989,7 @@ async def stream_shell_output():
                                 current_msg = None
                                 current_event = None
                                 command_output_buffer = ""
+                                raw_command_output_buffer = ""
                                 current_output_mode = "chat"
                                 current_output_no_session = False
                                 current_shot_clear_after = False
@@ -930,6 +1069,8 @@ async def shell_handler(event):
     global current_shot_save_path
     global current_command_started_at
     global current_command_last_activity
+    global raw_output_buffer
+    global raw_command_output_buffer
     global shot_theme
     global shot_title
 
@@ -1123,10 +1264,20 @@ async def shell_handler(event):
 
             idx += 1
 
-        await send_terminal_screenshot(event, tail_output(tail_arg), wide=wide, save_path=save_path)
+        shot_source = raw_output_buffer or output_buffer
+
+        if tail_arg:
+            try:
+                line_count = max(1, int(tail_arg))
+            except ValueError:
+                line_count = 80
+            shot_source = "\n".join(shot_source.splitlines()[-line_count:])
+
+        await send_terminal_screenshot(event, shot_source, wide=wide, save_path=save_path)
 
         if clear_after:
             output_buffer = ""
+            raw_output_buffer = ""
             output_revision += 1
 
         return
@@ -1173,6 +1324,7 @@ async def shell_handler(event):
 
     if command_key == "buf clear":
         output_buffer = ""
+        raw_output_buffer = ""
         output_revision += 1
         await event.reply(tg_code("Session output buffer cleared."))
         return
@@ -1346,6 +1498,7 @@ async def shell_handler(event):
     command_history[:] = command_history[-200:]
 
     command_output_buffer = ""
+    raw_command_output_buffer = ""
     output_revision += 1
     current_event = event
     current_command_started_at = time.time()
