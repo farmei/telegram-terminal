@@ -42,8 +42,6 @@ current_event = None
 
 output_buffer = ""
 command_output_buffer = ""
-raw_output_buffer = ""
-raw_command_output_buffer = ""
 output_revision = 0
 
 editor_state = None
@@ -56,8 +54,6 @@ current_output_mode = "chat"
 current_output_no_session = False
 current_shot_clear_after = False
 current_shot_save_path = None
-current_live_delay = None
-current_live_wide = False
 shot_theme = "green"
 shot_title = "telegram-terminal"
 started_at = time.time()
@@ -162,8 +158,6 @@ $shot reset            Reset screenshot settings
 $shot run <command>    Run command and send output image
 $shot run clear <cmd>  Run, send image, clear buffer
 $shot run --no-session <cmd> Run without adding output to session buffer
-$shot live <seconds> <cmd> Capture live fullscreen command
-$shot live wide <seconds> <cmd> Capture wide live fullscreen command
 $cmd history           Show command history
 $cmd last              Show last shell command
 $cmd rerun N           Run command from history
@@ -404,59 +398,6 @@ async def send_terminal_screenshot(event, content, wide=False, save_path=None):
         image_path = Path(tmp_dir) / "telegram-terminal.png"
         image.save(image_path, "PNG")
         await event.reply("Terminal screenshot:", file=str(image_path))
-
-
-async def finish_live_screenshot(delay):
-    global current_msg
-    global current_output_mode
-    global current_output_no_session
-    global current_shot_clear_after
-    global current_shot_save_path
-    global current_live_delay
-    global current_live_wide
-    global current_live_delay
-    global current_live_wide
-    global output_buffer
-    global raw_output_buffer
-    global output_revision
-
-    await asyncio.sleep(delay)
-
-    if current_output_mode != "live":
-        return
-
-    target_event = current_event or current_msg
-
-    if target_event:
-        await send_terminal_screenshot(
-            target_event,
-            raw_command_output_buffer or command_output_buffer,
-            wide=current_live_wide,
-            save_path=current_shot_save_path,
-        )
-
-    try:
-        shell.sendintr()
-    except Exception:
-        pass
-
-    if current_msg:
-        try:
-            await current_msg.delete()
-        except Exception:
-            pass
-
-    if current_shot_clear_after:
-        output_buffer = ""
-        raw_output_buffer = ""
-        output_revision += 1
-
-    current_output_mode = "chat"
-    current_output_no_session = False
-    current_shot_clear_after = False
-    current_shot_save_path = None
-    current_live_delay = None
-    current_live_wide = False
 
 
 async def handle_editor_command(event, command):
@@ -766,8 +707,6 @@ async def stream_shell_output():
     global current_event
     global output_buffer
     global command_output_buffer
-    global raw_output_buffer
-    global raw_command_output_buffer
     global output_revision
     global current_output_mode
     global current_output_no_session
@@ -798,7 +737,6 @@ async def stream_shell_output():
 
                 if data:
 
-                    raw_data = data
                     cleaned = clean_output(data)
 
                     command_finished = False
@@ -809,24 +747,16 @@ async def stream_shell_output():
                             DONE_MARKER,
                             ""
                         )
-                        raw_data = raw_data.replace(
-                            DONE_MARKER,
-                            ""
-                        )
 
                         command_finished = True
 
                     if not current_output_no_session:
                         output_buffer += cleaned
-                        raw_output_buffer += raw_data
 
                     command_output_buffer += cleaned
-                    raw_command_output_buffer += raw_data
 
                     output_buffer = output_buffer[-MAX_BUFFER_SIZE:]
-                    raw_output_buffer = raw_output_buffer[-MAX_BUFFER_SIZE:]
                     command_output_buffer = command_output_buffer[-MAX_BUFFER_SIZE:]
-                    raw_command_output_buffer = raw_command_output_buffer[-MAX_BUFFER_SIZE:]
 
                     now = time.time()
 
@@ -841,22 +771,11 @@ async def stream_shell_output():
                                 if current_log_path:
                                     write_command_log(last_command or "", command_output_buffer, current_log_path)
 
-                                if current_output_mode == "live":
-                                    current_output_mode = "chat"
-                                    current_output_no_session = False
-                                    current_shot_clear_after = False
-                                    current_shot_save_path = None
-                                    current_live_delay = None
-                                    current_live_wide = False
-                                    last_text = trimmed
-                                    last_edit = now
-                                    continue
-
                                 if current_output_mode == "ss":
                                     target_event = current_event or current_msg
                                     await send_terminal_screenshot(
                                         target_event,
-                                        raw_command_output_buffer or command_output_buffer,
+                                        command_output_buffer,
                                         save_path=current_shot_save_path,
                                     )
 
@@ -965,8 +884,6 @@ async def shell_handler(event):
     global current_event
     global output_buffer
     global command_output_buffer
-    global raw_output_buffer
-    global raw_command_output_buffer
     global output_revision
     global last_command
     global log_enabled
@@ -975,8 +892,6 @@ async def shell_handler(event):
     global current_output_no_session
     global current_shot_clear_after
     global current_shot_save_path
-    global current_live_delay
-    global current_live_wide
     global shot_theme
     global shot_title
 
@@ -1089,39 +1004,6 @@ async def shell_handler(event):
 
         return
 
-    if command.startswith("shot live "):
-        live_text = command[10:].strip()
-        live_parts = live_text.split(maxsplit=2)
-        current_live_wide = False
-        current_shot_clear_after = False
-        current_output_no_session = False
-        current_shot_save_path = None
-
-        if live_parts and live_parts[0] == "wide":
-            current_live_wide = True
-            live_parts = live_text.split(maxsplit=3)[1:]
-
-        if len(live_parts) < 2:
-            await event.reply(tg_code("Usage: $shot live [wide] <seconds> <command>"))
-            return
-
-        try:
-            current_live_delay = max(1.0, min(30.0, float(live_parts[0])))
-        except ValueError:
-            await event.reply(tg_code("Usage: $shot live [wide] <seconds> <command>"))
-            return
-
-        command = live_parts[1] if len(live_parts) == 2 else live_parts[1] + " " + live_parts[2]
-
-        if not command:
-            await event.reply(tg_code("Usage: $shot live [wide] <seconds> <command>"))
-            return
-
-        command_key = command.lower().replace("+", " ").replace("-", " ")
-        command_key = " ".join(command_key.split())
-        command_key = aliases.get(command_key, command_key)
-        current_output_mode = "live"
-
     if command.startswith("shot run "):
         run_text = command[9:].strip()
         current_shot_clear_after = False
@@ -1194,12 +1076,10 @@ async def shell_handler(event):
 
             idx += 1
 
-        screenshot_content = select_output_lines(raw_output_buffer or output_buffer, tail_arg) if (raw_output_buffer or output_buffer) else tail_output(tail_arg)
-        await send_terminal_screenshot(event, screenshot_content, wide=wide, save_path=save_path)
+        await send_terminal_screenshot(event, tail_output(tail_arg), wide=wide, save_path=save_path)
 
         if clear_after:
             output_buffer = ""
-            raw_output_buffer = ""
             output_revision += 1
 
         return
@@ -1246,7 +1126,6 @@ async def shell_handler(event):
 
     if command_key == "buf clear":
         output_buffer = ""
-        raw_output_buffer = ""
         output_revision += 1
         await event.reply(tg_code("Session output buffer cleared."))
         return
@@ -1309,9 +1188,7 @@ async def shell_handler(event):
     if command_key in ("tt restart", "tt restart shell"):
         restart_shell()
         output_buffer = ""
-        raw_output_buffer = ""
         command_output_buffer = ""
-        raw_command_output_buffer = ""
         current_msg = None
         current_event = None
         await event.reply(tg_code("Shell restarted."))
@@ -1425,15 +1302,12 @@ async def shell_handler(event):
     command_history[:] = command_history[-200:]
 
     command_output_buffer = ""
-    raw_command_output_buffer = ""
     output_revision += 1
     current_event = event
     current_log_path = create_log_path(command) if log_enabled else None
 
     if current_output_mode == "ss":
         current_msg = await event.reply(tg_code(f"Capturing:\n{command}"))
-    elif current_output_mode == "live":
-        current_msg = await event.reply(tg_code(f"Live capture ({current_live_delay}s):\n{command}"))
     else:
         current_msg = await event.reply(
             tg_code(f"Running:\n{command}")
@@ -1466,9 +1340,6 @@ async def shell_handler(event):
                 f"stdbuf -oL -eL {command}; "
                 f"echo {DONE_MARKER}"
             )
-
-        if current_output_mode == "live":
-            asyncio.create_task(finish_live_screenshot(current_live_delay or 3.0))
 
     except Exception as e:
 
