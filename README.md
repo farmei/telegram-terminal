@@ -133,6 +133,8 @@ These commands use the accumulated output buffer from the current bot session. `
 
 Large command outputs are still sent automatically as `.txt` files when a command finishes.
 
+Note: interactive terminal apps such as `btop`, `htop`, `nano`, `vim` and similar fullscreen programs may not render correctly in `$shot`. They are best used with static output commands or `$shot run` on non-interactive commands.
+
 ### Utility Commands
 
 - `$tt help`
