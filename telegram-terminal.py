@@ -335,11 +335,11 @@ def draw_circle(pixels, width, height, cx, cy, radius, color):
                 pixels[idx:idx + 3] = bytes(color)
 
 
-def draw_text(pixels, width, height, x, y, text, color, scale=3):
+def draw_text(pixels, width, height, x, y, text, color, scale=2, line_gap=2):
     cursor_x = x
     cursor_y = y
     char_width = 6 * scale
-    line_height = 9 * scale
+    line_height = 7 * scale + line_gap
 
     for char in text:
         if char == "\n":
@@ -382,23 +382,24 @@ async def send_terminal_screenshot(event, content):
         content = "Output buffer is empty."
 
     content = clean_output(content).replace("\r", "")
-    lines = content.splitlines()[-30:]
+    lines = content.splitlines()[-44:]
     cropped = []
 
     for line in lines:
-        cropped.append(line[:116])
+        cropped.append(line[:155])
 
     content = "\n".join(cropped)
-    width = 1280
-    height = 760
-    pixels = bytearray(bytes((5, 5, 5)) * width * height)
+    width = 1440
+    height = 900
+    pixels = bytearray(bytes((8, 11, 16)) * width * height)
 
-    draw_rect(pixels, width, height, 0, 0, width, 58, (31, 41, 51))
-    draw_circle(pixels, width, height, 30, 29, 9, (255, 95, 87))
-    draw_circle(pixels, width, height, 62, 29, 9, (255, 189, 46))
-    draw_circle(pixels, width, height, 94, 29, 9, (40, 200, 64))
-    draw_text(pixels, width, height, 128, 20, "telegram-terminal", (216, 222, 233), scale=3)
-    draw_text(pixels, width, height, 38, 92, content, (216, 255, 224), scale=3)
+    draw_rect(pixels, width, height, 0, 0, width, 54, (24, 30, 39))
+    draw_rect(pixels, width, height, 0, 54, width, 56, (42, 52, 65))
+    draw_circle(pixels, width, height, 30, 27, 8, (255, 95, 87))
+    draw_circle(pixels, width, height, 58, 27, 8, (255, 189, 46))
+    draw_circle(pixels, width, height, 86, 27, 8, (40, 200, 64))
+    draw_text(pixels, width, height, 120, 19, "telegram-terminal", (226, 232, 240), scale=2, line_gap=2)
+    draw_text(pixels, width, height, 28, 78, content, (220, 255, 226), scale=2, line_gap=4)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         image_path = Path(tmp_dir) / "telegram-terminal.png"
