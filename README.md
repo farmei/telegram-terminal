@@ -116,6 +116,8 @@ Large command outputs are still sent automatically as `.txt` files when a comman
 - `$tt help`
 - `$tt status`
 - `$tt restart`
+- `$tt version`
+- `$tt ping`
 - `$cmd history`
 - `$cmd history 50`
 - `$cmd last`

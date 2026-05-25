@@ -22,6 +22,7 @@ client = TelegramClient(
     api_hash
 )
 
+VERSION = "1.0.0"
 EDIT_INTERVAL = 3
 MAX_MESSAGE_OUTPUT = 3500
 MAX_BUFFER_SIZE = 200000
@@ -70,6 +71,8 @@ $<command>              Run a shell command
 $tt help               Show telegram-terminal help
 $tt status             Show shell/editor status
 $tt restart            Restart the persistent bash session
+$tt version            Show telegram-terminal version
+$tt ping               Check bot latency
 $ctrlc / $ctrl c       Send Ctrl+C
 $ctrld                  Send Ctrl+D
 $ctrlz                  Send Ctrl+Z
@@ -868,6 +871,17 @@ async def shell_handler(event):
 
     if command_key == "tt status":
         await event.reply(tg_code(shell_status()))
+        return
+
+    if command_key == "tt version":
+        await event.reply(tg_code(f"telegram-terminal {VERSION}"))
+        return
+
+    if command_key == "tt ping":
+        started = time.time()
+        msg = await event.reply(tg_code("pong"))
+        latency = int((time.time() - started) * 1000)
+        await msg.edit(tg_code(f"pong {latency}ms"))
         return
 
     if command_key == "buf tail" or command_key.startswith("buf tail "):
