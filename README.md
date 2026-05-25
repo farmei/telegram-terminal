@@ -25,6 +25,9 @@ A lightweight Telegram-based remote shell for Linux. It provides a persistent `b
 - Session output buffer clearing without interrupting active commands
 - Output rendering state reset between commands
 - Session output buffer status
+- Reset screenshot settings
+- Save session output buffer on the server
+- Bot uptime and about commands
 
 ## Commands
 
@@ -115,6 +118,7 @@ These commands use the accumulated output buffer from the current bot session. `
 - `$shot theme green`
 - `$shot theme white`
 - `$shot theme amber`
+- `$shot reset`
 - `$shot run neofetch`
 - `$shot run clear neofetch`
 - `$shot run --no-session neofetch`
@@ -122,6 +126,7 @@ These commands use the accumulated output buffer from the current bot session. `
 - `$shot run ls -la`
 - `$buf send`
 - `$buf send output.txt`
+- `$buf save output.txt`
 - `$buf clear`
 - `$buf status`
 
@@ -134,6 +139,8 @@ Large command outputs are still sent automatically as `.txt` files when a comman
 - `$tt restart`
 - `$tt version`
 - `$tt ping`
+- `$tt uptime`
+- `$tt about`
 - `$cmd history`
 - `$cmd history 50`
 - `$cmd last`
@@ -186,6 +193,8 @@ On the first run, Telegram will ask for login confirmation and create a local se
 Example:
 
 - `$tt ping`
+- `$tt uptime`
+- `$tt about`
 - `$pwd`
 - `$shot run neofetch`
 

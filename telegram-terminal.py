@@ -56,6 +56,7 @@ current_shot_clear_after = False
 current_shot_save_path = None
 shot_theme = "green"
 shot_title = "telegram-terminal"
+started_at = time.time()
 
 SHOT_THEMES = {
     "green": {
@@ -104,6 +105,8 @@ $tt status             Show shell/editor status
 $tt restart            Restart the persistent bash session
 $tt version            Show telegram-terminal version
 $tt ping               Check bot latency
+$tt uptime             Show bot uptime
+$tt about              Show bot summary
 $ctrlc / $ctrl c       Send Ctrl+C
 $ctrld                  Send Ctrl+D
 $ctrlz                  Send Ctrl+Z
@@ -115,6 +118,7 @@ $ttpaste <text>         Paste raw text into the shell
 $ttinput <text>         Send one input line
 $buf tail [lines|full] Show recent output buffer
 $buf send [file.txt]   Send output buffer as .txt
+$buf save <file.txt>   Save output buffer on server
 $buf clear             Clear session output buffer
 $buf status            Show output buffer status
 $shot [lines]          Send output as terminal image
@@ -123,6 +127,7 @@ $shot clear [lines]    Send image and clear buffer
 $shot file <path.png>  Save and send output image
 $shot title <text>     Set screenshot title
 $shot theme <name>     Set theme: green, white, amber
+$shot reset            Reset screenshot settings
 $shot run <command>    Run command and send output image
 $shot run clear <cmd>  Run, send image, clear buffer
 $shot run --no-session <cmd> Run without adding output to session buffer
@@ -730,6 +735,49 @@ def buffer_status():
     )
 
 
+
+def format_duration(seconds):
+    seconds = int(seconds)
+    days, seconds = divmod(seconds, 86400)
+    hours, seconds = divmod(seconds, 3600)
+    minutes, seconds = divmod(seconds, 60)
+    parts = []
+
+    if days:
+        parts.append(f"{days}d")
+
+    if hours or parts:
+        parts.append(f"{hours}h")
+
+    if minutes or parts:
+        parts.append(f"{minutes}m")
+
+    parts.append(f"{seconds}s")
+    return " ".join(parts)
+
+
+def about_text():
+    status = "alive" if shell.isalive() else "dead"
+    logging = "on" if log_enabled else "off"
+    editor = "none"
+
+    if editor_state:
+        dirty = "modified" if editor_state["dirty"] else "saved"
+        editor = f"{editor_state['path']} ({dirty})"
+
+    return (
+        f"telegram-terminal {VERSION}\n"
+        f"Uptime: {format_duration(time.time() - started_at)}\n"
+        f"Shell: {status}\n"
+        f"Session buffer: {len(output_buffer)} chars\n"
+        f"Last command: {last_command or 'none'}\n"
+        f"Logging: {logging}\n"
+        f"Shot theme: {shot_theme}\n"
+        f"Shot title: {shot_title}\n"
+        f"Editor: {editor}"
+    )
+
+
 async def stream_shell_output():
 
     global current_msg
@@ -976,6 +1024,14 @@ async def shell_handler(event):
         await msg.edit(tg_code(f"pong {latency}ms"))
         return
 
+    if command_key == "tt uptime":
+        await event.reply(tg_code(format_duration(time.time() - started_at)))
+        return
+
+    if command_key == "tt about":
+        await event.reply(tg_code(about_text()))
+        return
+
     if command_key == "buf tail" or command_key.startswith("buf tail "):
         tail_arg = command[8:].strip()
         content = tail_output(tail_arg)
@@ -1005,6 +1061,12 @@ async def shell_handler(event):
 
         shot_theme = theme
         await event.reply(tg_code(f"Screenshot theme set to: {shot_theme}"))
+        return
+
+    if command_key == "shot reset":
+        shot_theme = "green"
+        shot_title = "telegram-terminal"
+        await event.reply(tg_code("Screenshot settings reset."))
         return
 
     if command_key == "shot title" or command_key.startswith("shot title "):
@@ -1118,6 +1180,23 @@ async def shell_handler(event):
         )
         return
 
+    if command_key == "buf save" or command_key.startswith("buf save "):
+        args = command.split(maxsplit=2)
+
+        if len(args) < 3:
+            await event.reply(tg_code("Usage: $buf save <file.txt>"))
+            return
+
+        if not output_buffer:
+            await event.reply(tg_code("Output buffer is empty."))
+            return
+
+        save_path = Path(args[2]).expanduser()
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        save_path.write_text(output_buffer, encoding="utf-8", errors="replace")
+        await event.reply(tg_code(f"Output buffer saved: {save_path}"))
+        return
+
     if command_key == "buf status":
         await event.reply(tg_code(buffer_status()))
         return
@@ -1129,7 +1208,7 @@ async def shell_handler(event):
         return
 
     if command_key.startswith("buf "):
-        await event.reply(tg_code("Usage: $buf status | $buf clear | $buf tail | $buf send"))
+        await event.reply(tg_code("Usage: $buf status | $buf clear | $buf tail | $buf send | $buf save"))
         return
 
     if command_key == "cmd history" or command_key.startswith("cmd history "):
