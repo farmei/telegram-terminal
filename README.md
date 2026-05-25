@@ -123,6 +123,8 @@ These commands use the accumulated output buffer from the current bot session. `
 - `$shot theme amber`
 - `$shot reset`
 - `$shot run neofetch`
+- `$shot run normal neofetch`
+- `$shot run wide neofetch`
 - `$shot run clear neofetch`
 - `$shot run --no-session neofetch`
 - `$shot run file neofetch.png neofetch`
@@ -202,6 +204,8 @@ Example:
 - `$tt about`
 - `$pwd`
 - `$shot run neofetch`
+- `$shot run normal neofetch`
+- `$shot run wide neofetch`
 
 ## Version
 
