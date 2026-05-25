@@ -47,6 +47,7 @@ command_history = []
 last_command = None
 log_enabled = False
 current_log_path = None
+current_output_mode = "chat"
 
 ansi_escape = re.compile(
     r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])'
@@ -79,6 +80,7 @@ $restart-shell          Restart the persistent bash session
 $status                 Show shell/editor status
 $tail [lines|full]      Show recent output buffer
 $ss [lines]             Send output as terminal image
+$sscmd <command>        Run command and send output image
 $sendout [file.txt]     Send output buffer as .txt
 $buf clear              Clear output buffer
 $history                Show command history
@@ -636,6 +638,7 @@ async def stream_shell_output():
     global current_msg
     global output_buffer
     global command_output_buffer
+    global current_output_mode
 
     last_edit = 0
     last_text = ""
@@ -680,15 +683,23 @@ async def stream_shell_output():
 
                     if command_finished:
 
-                        if (
-                            current_msg and
-                            trimmed != last_text
-                        ):
+                        if current_msg:
 
                             try:
 
                                 if current_log_path:
                                     write_command_log(last_command or "", command_output_buffer, current_log_path)
+
+                                if current_output_mode == "ss":
+                                    await current_msg.delete()
+                                    await send_terminal_screenshot(current_msg, command_output_buffer)
+                                    current_output_mode = "chat"
+                                    last_text = trimmed
+                                    last_edit = now
+                                    continue
+
+                                if trimmed == last_text:
+                                    continue
 
                                 if len(command_output_buffer) > MAX_MESSAGE_OUTPUT:
                                     suffix = "\n\nOutput is large. Sending full output as .txt..."
@@ -775,6 +786,7 @@ async def shell_handler(event):
     global last_command
     global log_enabled
     global current_log_path
+    global current_output_mode
 
     if not event.out:
         return
@@ -831,6 +843,22 @@ async def shell_handler(event):
         else:
             await event.reply(tg_code(content))
 
+        return
+
+    if command.startswith("sscmd "):
+        command = command[6:].strip()
+
+        if not command:
+            await event.reply(tg_code("Usage: $sscmd <command>"))
+            return
+
+        command_key = command.lower().replace("+", " ").replace("-", " ")
+        command_key = " ".join(command_key.split())
+        command_key = aliases.get(command_key, command_key)
+        current_output_mode = "ss"
+
+    elif command_key == "sscmd":
+        await event.reply(tg_code("Usage: $sscmd <command>"))
         return
 
     if command_key == "ss" or command_key.startswith("ss "):
@@ -1033,9 +1061,12 @@ async def shell_handler(event):
     command_output_buffer = ""
     current_log_path = create_log_path(command) if log_enabled else None
 
-    current_msg = await event.reply(
-        tg_code(f"Running:\n{command}")
-    )
+    if current_output_mode == "ss":
+        current_msg = await event.reply(tg_code(f"Capturing:\n{command}"))
+    else:
+        current_msg = await event.reply(
+            tg_code(f"Running:\n{command}")
+        )
 
     try:
 

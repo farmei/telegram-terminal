@@ -17,6 +17,7 @@ A lightweight Telegram-based remote shell for Linux. It provides a persistent `b
 - Command history with rerun support
 - Optional output logging to `logs/`
 - Terminal-style screenshots from command output
+- Run commands directly as terminal screenshots
 - Session output buffer clearing
 
 ## Commands
@@ -101,6 +102,8 @@ These commands use the accumulated output buffer from the current bot session:
 - `$tail full`
 - `$ss`
 - `$ss 80`
+- `$sscmd neofetch`
+- `$sscmd ls -la`
 - `$sendout`
 - `$sendout output.txt`
 - `$buf clear`
