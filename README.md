@@ -13,7 +13,7 @@ A lightweight Telegram-based remote shell for Linux. It provides a persistent `b
 - Download files from the server to Telegram
 - Built-in Telegram-friendly text editor
 - Editor undo, find and replace commands
-- Shell status and restart commands
+- Shell status, reset and restart commands
 - Command history with rerun support
 - Optional output logging to `logs/`
 - Terminal-style screenshots from command output
@@ -26,6 +26,7 @@ A lightweight Telegram-based remote shell for Linux. It provides a persistent `b
 - Session output buffer clearing without interrupting active commands
 - Output rendering state reset between commands
 - Session output buffer status
+- Shell watchdog that restarts a dead or stalled bash session
 - Reset screenshot settings
 - Save session output buffer on the server
 - Bot uptime and about commands
@@ -140,6 +141,7 @@ Note: interactive terminal apps such as `btop`, `htop`, `nano`, `vim` and simila
 - `$tt help`
 - `$tt status`
 - `$tt restart`
+- `$tt reset`
 - `$tt version`
 - `$tt ping`
 - `$tt uptime`

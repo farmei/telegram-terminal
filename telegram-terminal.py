@@ -53,9 +53,14 @@ current_output_mode = "chat"
 current_output_no_session = False
 current_shot_clear_after = False
 current_shot_save_path = None
+current_command_started_at = None
+current_command_last_activity = None
 shot_theme = "green"
 shot_title = "telegram-terminal"
 started_at = time.time()
+
+SHELL_WATCHDOG_IDLE_TIMEOUT = 1800
+SHELL_WATCHDOG_POLL_INTERVAL = 10
 
 SHOT_THEMES = {
     "green": {
@@ -111,6 +116,7 @@ $tt version            Show telegram-terminal version
 $tt ping               Check bot latency
 $tt uptime             Show bot uptime
 $tt about              Show bot summary
+$tt reset              Clear bot runtime state
 $ctrlc / $ctrl c       Send Ctrl+C
 $ctrld                  Send Ctrl+D
 $ctrlz                  Send Ctrl+Z
@@ -250,6 +256,32 @@ def write_command_log(command, content, path):
 
     header = f"Command: {command}\nTime: {datetime.now().isoformat(timespec='seconds')}\n\n"
     path.write_text(header + content, encoding="utf-8", errors="replace")
+
+
+def reset_runtime_state():
+    global current_msg
+    global current_event
+    global command_output_buffer
+    global output_revision
+    global current_log_path
+    global current_output_mode
+    global current_output_no_session
+    global current_shot_clear_after
+    global current_shot_save_path
+    global current_command_started_at
+    global current_command_last_activity
+
+    current_msg = None
+    current_event = None
+    command_output_buffer = ""
+    current_log_path = None
+    current_output_mode = "chat"
+    current_output_no_session = False
+    current_shot_clear_after = False
+    current_shot_save_path = None
+    current_command_started_at = None
+    current_command_last_activity = None
+    output_revision += 1
 
 
 async def send_text_file(event, content, filename="telegram-terminal-output.txt", message="Output attached as text file."):
@@ -565,6 +597,50 @@ def restart_shell():
     shell.delaybeforesend = 0
 
 
+async def shell_watchdog():
+    global current_command_started_at
+    global current_command_last_activity
+
+    while True:
+        await asyncio.sleep(SHELL_WATCHDOG_POLL_INTERVAL)
+
+        try:
+            if not shell.isalive():
+                print("Watchdog: shell dead; restarting")
+                restart_shell()
+                reset_runtime_state()
+                continue
+
+            if not current_command_started_at or not current_command_last_activity:
+                continue
+
+            if not command_output_buffer:
+                continue
+
+            idle_for = time.time() - current_command_last_activity
+
+            if idle_for < SHELL_WATCHDOG_IDLE_TIMEOUT:
+                continue
+
+            print(f"Watchdog: shell idle for {int(idle_for)}s; restarting")
+
+            if current_event:
+                try:
+                    await current_event.reply(
+                        tg_code(
+                            "Shell watchdog restarted the session after inactivity."
+                        )
+                    )
+                except Exception:
+                    pass
+
+            restart_shell()
+            reset_runtime_state()
+
+        except Exception as e:
+            print(f"Watchdog Error: {e}")
+
+
 def shell_status():
     status = "alive" if shell.isalive() else "dead"
     editor = "none"
@@ -654,6 +730,8 @@ async def stream_shell_output():
     global current_output_no_session
     global current_shot_clear_after
     global current_shot_save_path
+    global current_command_started_at
+    global current_command_last_activity
 
     last_edit = 0
     last_text = ""
@@ -701,6 +779,7 @@ async def stream_shell_output():
                     command_output_buffer = command_output_buffer[-MAX_BUFFER_SIZE:]
 
                     now = time.time()
+                    current_command_last_activity = now
 
                     trimmed = command_output_buffer[-MAX_MESSAGE_OUTPUT:]
 
@@ -734,6 +813,11 @@ async def stream_shell_output():
                                     current_output_no_session = False
                                     current_shot_clear_after = False
                                     current_shot_save_path = None
+                                    current_msg = None
+                                    current_event = None
+                                    command_output_buffer = ""
+                                    current_command_started_at = None
+                                    current_command_last_activity = None
                                     last_text = trimmed
                                     last_edit = now
                                     continue
@@ -764,6 +848,15 @@ async def stream_shell_output():
                                         tg_code(trimmed + suffix)
                                     )
 
+                                current_msg = None
+                                current_event = None
+                                command_output_buffer = ""
+                                current_output_mode = "chat"
+                                current_output_no_session = False
+                                current_shot_clear_after = False
+                                current_shot_save_path = None
+                                current_command_started_at = None
+                                current_command_last_activity = None
                                 last_text = trimmed
                                 last_edit = now
 
@@ -812,6 +905,7 @@ async def stream_shell_output():
         except pexpect.exceptions.EOF:
             print("Shell EOF; restarting shell")
             restart_shell()
+            reset_runtime_state()
             last_text = ""
             last_edit = 0
 
@@ -834,6 +928,8 @@ async def shell_handler(event):
     global current_output_no_session
     global current_shot_clear_after
     global current_shot_save_path
+    global current_command_started_at
+    global current_command_last_activity
     global shot_theme
     global shot_title
 
@@ -895,6 +991,15 @@ async def shell_handler(event):
 
     if command_key == "tt about":
         await event.reply(tg_code(about_text()))
+        return
+
+    if command_key == "tt reset" or command_key == "tt cleanup":
+        reset_runtime_state()
+
+        if not shell.isalive():
+            restart_shell()
+
+        await event.reply(tg_code("Runtime state reset."))
         return
 
     if command_key == "buf tail" or command_key.startswith("buf tail "):
@@ -1129,10 +1234,7 @@ async def shell_handler(event):
 
     if command_key in ("tt restart", "tt restart shell"):
         restart_shell()
-        output_buffer = ""
-        command_output_buffer = ""
-        current_msg = None
-        current_event = None
+        reset_runtime_state()
         await event.reply(tg_code("Shell restarted."))
         return
 
@@ -1246,6 +1348,8 @@ async def shell_handler(event):
     command_output_buffer = ""
     output_revision += 1
     current_event = event
+    current_command_started_at = time.time()
+    current_command_last_activity = current_command_started_at
     current_log_path = create_log_path(command) if log_enabled else None
 
     if current_output_mode == "ss":
@@ -1296,6 +1400,9 @@ async def main():
 
     asyncio.create_task(
         stream_shell_output()
+    )
+    asyncio.create_task(
+        shell_watchdog()
     )
 
     await client.start()
