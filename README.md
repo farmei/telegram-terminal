@@ -86,10 +86,10 @@ Editor commands:
 - `$e save`
 - `$e cancel`
 
-### Utility Commands
+### Session Output
 
-- `$help`
-- `$status`
+These commands use the accumulated output buffer from the current bot session:
+
 - `$tail`
 - `$tail 200`
 - `$tail full`
@@ -97,6 +97,13 @@ Editor commands:
 - `$ss 80`
 - `$sendout`
 - `$sendout output.txt`
+
+Large command outputs are still sent automatically as `.txt` files when a command finishes.
+
+### Utility Commands
+
+- `$help`
+- `$status`
 - `$history`
 - `$history 50`
 - `$last`
