@@ -2,12 +2,13 @@ import asyncio
 import time
 import re
 import shlex
+import struct
 import tempfile
+import zlib
 from datetime import datetime
 from pathlib import Path
 
 import pexpect
-from PIL import Image, ImageDraw, ImageFont
 
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
@@ -64,32 +65,27 @@ SHELL_WATCHDOG_POLL_INTERVAL = 10
 
 SHOT_THEMES = {
     "green": {
-        "bg": (0, 0, 0),
-        "bar": (18, 18, 18),
-        "line": (46, 46, 46),
-        "title": (238, 238, 238),
+        "bg": (8, 11, 16),
+        "bar": (24, 30, 39),
+        "line": (42, 52, 65),
+        "title": (226, 232, 240),
         "text": (220, 255, 226),
     },
     "white": {
-        "bg": (0, 0, 0),
-        "bar": (18, 18, 18),
-        "line": (46, 46, 46),
+        "bg": (10, 14, 20),
+        "bar": (28, 34, 44),
+        "line": (58, 67, 82),
         "title": (238, 242, 247),
         "text": (235, 239, 245),
     },
     "amber": {
-        "bg": (0, 0, 0),
-        "bar": (24, 18, 8),
+        "bg": (16, 12, 5),
+        "bar": (42, 31, 15),
         "line": (82, 58, 22),
         "title": (255, 236, 179),
         "text": (255, 213, 128),
     },
 }
-
-FONT_PATHS = [
-    "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-]
 
 ansi_escape = re.compile(
     r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])'
@@ -302,19 +298,170 @@ async def send_text_file(event, content, filename="telegram-terminal-output.txt"
 
 
 
-def load_terminal_font(size):
-    for font_path in FONT_PATHS:
-        if Path(font_path).exists():
-            return ImageFont.truetype(font_path, size=size)
+FONT_5X7 = {
+    " ": [0, 0, 0, 0, 0, 0, 0],
+    "!": [4, 4, 4, 4, 4, 0, 4],
+    "\"": [10, 10, 10, 0, 0, 0, 0],
+    "#": [10, 10, 31, 10, 31, 10, 10],
+    "$": [4, 15, 20, 14, 5, 30, 4],
+    "%": [24, 25, 2, 4, 8, 19, 3],
+    "&": [12, 18, 20, 8, 21, 18, 13],
+    "'": [4, 4, 8, 0, 0, 0, 0],
+    "(": [2, 4, 8, 8, 8, 4, 2],
+    ")": [8, 4, 2, 2, 2, 4, 8],
+    "*": [0, 4, 21, 14, 21, 4, 0],
+    "+": [0, 4, 4, 31, 4, 4, 0],
+    ",": [0, 0, 0, 0, 4, 4, 8],
+    "-": [0, 0, 0, 31, 0, 0, 0],
+    ".": [0, 0, 0, 0, 0, 12, 12],
+    "/": [1, 2, 4, 8, 16, 0, 0],
+    "0": [14, 17, 19, 21, 25, 17, 14],
+    "1": [4, 12, 4, 4, 4, 4, 14],
+    "2": [14, 17, 1, 2, 4, 8, 31],
+    "3": [30, 1, 1, 14, 1, 1, 30],
+    "4": [2, 6, 10, 18, 31, 2, 2],
+    "5": [31, 16, 16, 30, 1, 1, 30],
+    "6": [14, 16, 16, 30, 17, 17, 14],
+    "7": [31, 1, 2, 4, 8, 8, 8],
+    "8": [14, 17, 17, 14, 17, 17, 14],
+    "9": [14, 17, 17, 15, 1, 1, 14],
+    ":": [0, 12, 12, 0, 12, 12, 0],
+    ";": [0, 12, 12, 0, 4, 4, 8],
+    "<": [2, 4, 8, 16, 8, 4, 2],
+    "=": [0, 0, 31, 0, 31, 0, 0],
+    ">": [8, 4, 2, 1, 2, 4, 8],
+    "?": [14, 17, 1, 2, 4, 0, 4],
+    "@": [14, 17, 1, 13, 21, 21, 14],
+    "A": [14, 17, 17, 31, 17, 17, 17],
+    "B": [30, 17, 17, 30, 17, 17, 30],
+    "C": [14, 17, 16, 16, 16, 17, 14],
+    "D": [30, 17, 17, 17, 17, 17, 30],
+    "E": [31, 16, 16, 30, 16, 16, 31],
+    "F": [31, 16, 16, 30, 16, 16, 16],
+    "G": [14, 17, 16, 23, 17, 17, 14],
+    "H": [17, 17, 17, 31, 17, 17, 17],
+    "I": [14, 4, 4, 4, 4, 4, 14],
+    "J": [7, 2, 2, 2, 18, 18, 12],
+    "K": [17, 18, 20, 24, 20, 18, 17],
+    "L": [16, 16, 16, 16, 16, 16, 31],
+    "M": [17, 27, 21, 21, 17, 17, 17],
+    "N": [17, 25, 21, 19, 17, 17, 17],
+    "O": [14, 17, 17, 17, 17, 17, 14],
+    "P": [30, 17, 17, 30, 16, 16, 16],
+    "Q": [14, 17, 17, 17, 21, 18, 13],
+    "R": [30, 17, 17, 30, 20, 18, 17],
+    "S": [15, 16, 16, 14, 1, 1, 30],
+    "T": [31, 4, 4, 4, 4, 4, 4],
+    "U": [17, 17, 17, 17, 17, 17, 14],
+    "V": [17, 17, 17, 17, 17, 10, 4],
+    "W": [17, 17, 17, 21, 21, 21, 10],
+    "X": [17, 17, 10, 4, 10, 17, 17],
+    "Y": [17, 17, 10, 4, 4, 4, 4],
+    "Z": [31, 1, 2, 4, 8, 16, 31],
+    "[": [14, 8, 8, 8, 8, 8, 14],
+    "\\": [16, 8, 4, 2, 1, 0, 0],
+    "]": [14, 2, 2, 2, 2, 2, 14],
+    "^": [4, 10, 17, 0, 0, 0, 0],
+    "_": [0, 0, 0, 0, 0, 0, 31],
+    "`": [8, 4, 2, 0, 0, 0, 0],
+    "{": [2, 4, 4, 8, 4, 4, 2],
+    "|": [4, 4, 4, 0, 4, 4, 4],
+    "}": [8, 4, 4, 2, 4, 4, 8],
+    "~": [0, 0, 8, 21, 2, 0, 0],
+}
 
-    return ImageFont.load_default()
+for char in "abcdefghijklmnopqrstuvwxyz":
+    FONT_5X7[char] = FONT_5X7[char.upper()]
 
 
-def text_metrics(font):
-    bbox = font.getbbox("M")
-    width = max(8, bbox[2] - bbox[0] + 1)
-    height = max(16, bbox[3] - bbox[1] + 6)
-    return width, height
+def png_chunk(kind, data):
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+
+
+def write_png(path, width, height, pixels):
+    raw = bytearray()
+
+    for y in range(height):
+        raw.append(0)
+        start = y * width * 3
+        raw.extend(pixels[start:start + width * 3])
+
+    data = b"\x89PNG\r\n\x1a\n"
+    data += png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+    data += png_chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+    data += png_chunk(b"IEND", b"")
+    path.write_bytes(data)
+
+
+def draw_rect(pixels, width, height, x1, y1, x2, y2, color):
+    x1 = max(0, min(width, x1))
+    x2 = max(0, min(width, x2))
+    y1 = max(0, min(height, y1))
+    y2 = max(0, min(height, y2))
+
+    for y in range(y1, y2):
+        row = y * width * 3
+        for x in range(x1, x2):
+            idx = row + x * 3
+            pixels[idx:idx + 3] = bytes(color)
+
+
+def draw_circle(pixels, width, height, cx, cy, radius, color):
+    rr = radius * radius
+
+    for y in range(cy - radius, cy + radius + 1):
+        if y < 0 or y >= height:
+            continue
+
+        for x in range(cx - radius, cx + radius + 1):
+            if x < 0 or x >= width:
+                continue
+
+            if (x - cx) ** 2 + (y - cy) ** 2 <= rr:
+                idx = (y * width + x) * 3
+                pixels[idx:idx + 3] = bytes(color)
+
+
+def draw_text(pixels, width, height, x, y, text, color, scale=2, line_gap=2):
+    cursor_x = x
+    cursor_y = y
+    char_width = 6 * scale
+    line_height = 7 * scale + line_gap
+
+    for char in text:
+        if char == "\n":
+            cursor_x = x
+            cursor_y += line_height
+            continue
+
+        if char == "\t":
+            cursor_x += char_width * 4
+            continue
+
+        glyph = FONT_5X7.get(char, FONT_5X7.get("?"))
+
+        for gy, row in enumerate(glyph):
+            for gx in range(5):
+                if row & (1 << (4 - gx)):
+                    draw_rect(
+                        pixels,
+                        width,
+                        height,
+                        cursor_x + gx * scale,
+                        cursor_y + gy * scale,
+                        cursor_x + (gx + 1) * scale,
+                        cursor_y + (gy + 1) * scale,
+                        color,
+                    )
+
+        cursor_x += char_width
+
+        if cursor_x > width - char_width:
+            cursor_x = x
+            cursor_y += line_height
+
+        if cursor_y > height - line_height:
+            break
 
 
 async def send_terminal_screenshot(event, content, wide=False, save_path=None):
@@ -325,52 +472,40 @@ async def send_terminal_screenshot(event, content, wide=False, save_path=None):
     content = clean_output(content).replace("\r", "")
 
     if wide:
-        max_lines = 54
-        max_cols = 180
-        font_size = 16
+        width = 1800
+        height = 1000
+        max_lines = 50
+        max_cols = 210
     else:
+        width = 1440
+        height = 900
         max_lines = 44
-        max_cols = 145
-        font_size = 17
-
-    font = load_terminal_font(font_size)
-    title_font = load_terminal_font(16)
-    cell_width, cell_height = text_metrics(font)
-    pad_x = 28
-    pad_top = 78
-    pad_bottom = 28
-    title_height = 56
-    width = pad_x * 2 + max_cols * cell_width
-    height = pad_top + max_lines * cell_height + pad_bottom
+        max_cols = 155
 
     lines = content.splitlines()[-max_lines:]
-    lines = [line[:max_cols] for line in lines]
+    cropped = [line[:max_cols] for line in lines]
+    content = "\n".join(cropped)
 
-    image = Image.new("RGB", (width, height), theme["bg"])
-    draw = ImageDraw.Draw(image)
-    draw.rectangle((0, 0, width, title_height), fill=theme["bar"])
-    draw.rectangle((0, title_height, width, title_height + 2), fill=theme["line"])
-    draw.ellipse((22, 20, 38, 36), fill=(255, 95, 87))
-    draw.ellipse((50, 20, 66, 36), fill=(255, 189, 46))
-    draw.ellipse((78, 20, 94, 36), fill=(40, 200, 64))
-    draw.text((120, 18), shot_title[:80], fill=theme["title"], font=title_font)
+    pixels = bytearray(bytes(theme["bg"]) * width * height)
 
-    y = pad_top
-
-    for line in lines:
-        draw.text((pad_x, y), line, fill=theme["text"], font=font)
-        y += cell_height
+    draw_rect(pixels, width, height, 0, 0, width, 54, theme["bar"])
+    draw_rect(pixels, width, height, 0, 54, width, 56, theme["line"])
+    draw_circle(pixels, width, height, 30, 27, 8, (255, 95, 87))
+    draw_circle(pixels, width, height, 58, 27, 8, (255, 189, 46))
+    draw_circle(pixels, width, height, 86, 27, 8, (40, 200, 64))
+    draw_text(pixels, width, height, 120, 19, shot_title[:80], theme["title"], scale=2, line_gap=2)
+    draw_text(pixels, width, height, 28, 78, content, theme["text"], scale=2, line_gap=4)
 
     if save_path:
         image_path = Path(save_path).expanduser()
         image_path.parent.mkdir(parents=True, exist_ok=True)
-        image.save(image_path, "PNG")
+        write_png(image_path, width, height, pixels)
         await event.reply(f"Terminal screenshot saved: {image_path}", file=str(image_path))
         return
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         image_path = Path(tmp_dir) / "telegram-terminal.png"
-        image.save(image_path, "PNG")
+        write_png(image_path, width, height, pixels)
         await event.reply("Terminal screenshot:", file=str(image_path))
 
 
