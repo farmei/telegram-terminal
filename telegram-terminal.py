@@ -49,6 +49,35 @@ last_command = None
 log_enabled = False
 current_log_path = None
 current_output_mode = "chat"
+current_output_no_session = False
+current_shot_clear_after = False
+current_shot_save_path = None
+shot_theme = "green"
+shot_title = "telegram-terminal"
+
+SHOT_THEMES = {
+    "green": {
+        "bg": (8, 11, 16),
+        "bar": (24, 30, 39),
+        "line": (42, 52, 65),
+        "title": (226, 232, 240),
+        "text": (220, 255, 226),
+    },
+    "white": {
+        "bg": (10, 14, 20),
+        "bar": (28, 34, 44),
+        "line": (58, 67, 82),
+        "title": (238, 242, 247),
+        "text": (235, 239, 245),
+    },
+    "amber": {
+        "bg": (16, 12, 5),
+        "bar": (42, 31, 15),
+        "line": (82, 58, 22),
+        "title": (255, 236, 179),
+        "text": (255, 213, 128),
+    },
+}
 
 ansi_escape = re.compile(
     r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])'
@@ -87,7 +116,14 @@ $buf send [file.txt]   Send output buffer as .txt
 $buf clear             Clear output buffer
 $buf status            Show output buffer status
 $shot [lines]          Send output as terminal image
+$shot wide [lines]     Send wider output image
+$shot clear [lines]    Send image and clear buffer
+$shot file <path.png>  Save and send output image
+$shot title <text>     Set screenshot title
+$shot theme <name>     Set theme: green, white, amber
 $shot run <command>    Run command and send output image
+$shot run clear <cmd>  Run, send image, clear buffer
+$shot run --no-session <cmd> Run without adding output to session buffer
 $cmd history           Show command history
 $cmd last              Show last shell command
 $cmd rerun N           Run command from history
@@ -107,18 +143,18 @@ $ttedit replace-all old new Replace all matches
 $ttedit save           Save file
 $ttedit cancel         Close editor without saving
 
-Send a document with caption "$put <path>" to upload it."""
+Send a document with caption "$ttput <path>" to upload it."""
 
 
 def editor_preview(max_chars=3300):
     if not editor_state:
-        return "No file is open. Use $edit <file> first."
+        return "No file is open. Use $ttedit open <file> first."
 
     lines = editor_state["lines"]
     path = editor_state["path"]
     dirty = "modified" if editor_state["dirty"] else "saved"
     header = f"Editing: {path} ({len(lines)} lines, {dirty})\n"
-    header += "Commands: $e show | $e set N text | $e insert N text | $e delete N[-M] | $e save | $e cancel\n\n"
+    header += "Commands: $ttedit show | $ttedit set N text | $ttedit insert N text | $ttedit delete N[-M] | $ttedit save | $ttedit cancel\n\n"
     body = "\n".join(f"{idx:4}: {line}" for idx, line in enumerate(lines, start=1))
     preview = header + body
 
@@ -389,29 +425,44 @@ def draw_text(pixels, width, height, x, y, text, color, scale=2, line_gap=2):
             break
 
 
-async def send_terminal_screenshot(event, content):
+async def send_terminal_screenshot(event, content, wide=False, save_path=None):
     if not content.strip():
         content = "Output buffer is empty."
 
+    theme = SHOT_THEMES.get(shot_theme, SHOT_THEMES["green"])
     content = clean_output(content).replace("\r", "")
-    lines = content.splitlines()[-44:]
-    cropped = []
 
-    for line in lines:
-        cropped.append(line[:155])
+    if wide:
+        width = 1800
+        height = 1000
+        max_lines = 50
+        max_cols = 210
+    else:
+        width = 1440
+        height = 900
+        max_lines = 44
+        max_cols = 155
 
+    lines = content.splitlines()[-max_lines:]
+    cropped = [line[:max_cols] for line in lines]
     content = "\n".join(cropped)
-    width = 1440
-    height = 900
-    pixels = bytearray(bytes((8, 11, 16)) * width * height)
 
-    draw_rect(pixels, width, height, 0, 0, width, 54, (24, 30, 39))
-    draw_rect(pixels, width, height, 0, 54, width, 56, (42, 52, 65))
+    pixels = bytearray(bytes(theme["bg"]) * width * height)
+
+    draw_rect(pixels, width, height, 0, 0, width, 54, theme["bar"])
+    draw_rect(pixels, width, height, 0, 54, width, 56, theme["line"])
     draw_circle(pixels, width, height, 30, 27, 8, (255, 95, 87))
     draw_circle(pixels, width, height, 58, 27, 8, (255, 189, 46))
     draw_circle(pixels, width, height, 86, 27, 8, (40, 200, 64))
-    draw_text(pixels, width, height, 120, 19, "telegram-terminal", (226, 232, 240), scale=2, line_gap=2)
-    draw_text(pixels, width, height, 28, 78, content, (220, 255, 226), scale=2, line_gap=4)
+    draw_text(pixels, width, height, 120, 19, shot_title[:80], theme["title"], scale=2, line_gap=2)
+    draw_text(pixels, width, height, 28, 78, content, theme["text"], scale=2, line_gap=4)
+
+    if save_path:
+        image_path = Path(save_path).expanduser()
+        image_path.parent.mkdir(parents=True, exist_ok=True)
+        write_png(image_path, width, height, pixels)
+        await event.reply(f"Terminal screenshot saved: {image_path}", file=str(image_path))
+        return
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         image_path = Path(tmp_dir) / "telegram-terminal.png"
@@ -598,7 +649,7 @@ async def send_file(event, command):
     args = split_command_args(command)
 
     if len(args) < 2:
-        await event.reply(tg_code("Usage: $get <file>"))
+        await event.reply(tg_code("Usage: $ttget <file>"))
         return True
 
     path = Path(args[1]).expanduser()
@@ -615,11 +666,11 @@ async def receive_file(event, command):
     args = split_command_args(command)
 
     if len(args) < 2:
-        await event.reply(tg_code("Usage: send a document with caption '$put <path>'"))
+        await event.reply(tg_code("Usage: send a document with caption '$ttput <path>'"))
         return True
 
     if not event.message.file:
-        await event.reply(tg_code("Attach a document and use caption: $put <path>"))
+        await event.reply(tg_code("Attach a document and use caption: $ttput <path>"))
         return True
 
     path = Path(args[1]).expanduser()
@@ -683,6 +734,9 @@ async def stream_shell_output():
     global output_buffer
     global command_output_buffer
     global current_output_mode
+    global current_output_no_session
+    global current_shot_clear_after
+    global current_shot_save_path
 
     last_edit = 0
     last_text = ""
@@ -715,7 +769,9 @@ async def stream_shell_output():
 
                         command_finished = True
 
-                    output_buffer += cleaned
+                    if not current_output_no_session:
+                        output_buffer += cleaned
+
                     command_output_buffer += cleaned
 
                     output_buffer = output_buffer[-MAX_BUFFER_SIZE:]
@@ -736,8 +792,20 @@ async def stream_shell_output():
 
                                 if current_output_mode == "ss":
                                     await current_msg.delete()
-                                    await send_terminal_screenshot(current_msg, command_output_buffer)
+                                    await send_terminal_screenshot(
+                                        current_msg,
+                                        command_output_buffer,
+                                        save_path=current_shot_save_path,
+                                    )
+
+                                    if current_shot_clear_after:
+                                        output_buffer = ""
+                                        command_output_buffer = ""
+
                                     current_output_mode = "chat"
+                                    current_output_no_session = False
+                                    current_shot_clear_after = False
+                                    current_shot_save_path = None
                                     last_text = trimmed
                                     last_edit = now
                                     continue
@@ -831,6 +899,11 @@ async def shell_handler(event):
     global log_enabled
     global current_log_path
     global current_output_mode
+    global current_output_no_session
+    global current_shot_clear_after
+    global current_shot_save_path
+    global shot_theme
+    global shot_title
 
     if not event.out:
         return
@@ -900,8 +973,64 @@ async def shell_handler(event):
 
         return
 
+    if command_key == "shot theme" or command_key.startswith("shot theme "):
+        theme = command[10:].strip().lower()
+
+        if not theme:
+            await event.reply(tg_code(f"Current theme: {shot_theme}\nAvailable: {', '.join(SHOT_THEMES)}"))
+            return
+
+        if theme not in SHOT_THEMES:
+            await event.reply(tg_code(f"Unknown theme: {theme}\nAvailable: {', '.join(SHOT_THEMES)}"))
+            return
+
+        shot_theme = theme
+        await event.reply(tg_code(f"Screenshot theme set to: {shot_theme}"))
+        return
+
+    if command_key == "shot title" or command_key.startswith("shot title "):
+        title = command[10:].strip()
+
+        if not title:
+            shot_title = "telegram-terminal"
+            await event.reply(tg_code("Screenshot title reset."))
+        else:
+            shot_title = title[:80]
+            await event.reply(tg_code(f"Screenshot title set to: {shot_title}"))
+
+        return
+
     if command.startswith("shot run "):
-        command = command[9:].strip()
+        run_text = command[9:].strip()
+        current_shot_clear_after = False
+        current_output_no_session = False
+        current_shot_save_path = None
+
+        while True:
+            if run_text.startswith("clear "):
+                current_shot_clear_after = True
+                run_text = run_text[6:].strip()
+                continue
+
+            if run_text.startswith("--no-session "):
+                current_output_no_session = True
+                run_text = run_text[13:].strip()
+                continue
+
+            if run_text.startswith("file "):
+                parts = run_text.split(maxsplit=2)
+
+                if len(parts) < 3:
+                    await event.reply(tg_code("Usage: $shot run file <path.png> <command>"))
+                    return
+
+                current_shot_save_path = parts[1]
+                run_text = parts[2].strip()
+                continue
+
+            break
+
+        command = run_text
 
         if not command:
             await event.reply(tg_code("Usage: $shot run <command>"))
@@ -917,9 +1046,38 @@ async def shell_handler(event):
         return
 
     if command_key == "shot" or command_key.startswith("shot "):
-        args = command.split(maxsplit=1)
-        screenshot_arg = args[1] if len(args) > 1 else ""
-        await send_terminal_screenshot(event, tail_output(screenshot_arg))
+        shot_args = command.split()
+        wide = False
+        clear_after = False
+        save_path = None
+        tail_arg = ""
+        idx = 1
+
+        while idx < len(shot_args):
+            arg = shot_args[idx]
+
+            if arg == "wide":
+                wide = True
+            elif arg == "clear":
+                clear_after = True
+            elif arg == "file":
+                if idx + 1 >= len(shot_args):
+                    await event.reply(tg_code("Usage: $shot file <path.png> [lines]"))
+                    return
+
+                save_path = shot_args[idx + 1]
+                idx += 1
+            elif arg not in ("run", "theme", "title"):
+                tail_arg = arg
+
+            idx += 1
+
+        await send_terminal_screenshot(event, tail_output(tail_arg), wide=wide, save_path=save_path)
+
+        if clear_after:
+            output_buffer = ""
+            command_output_buffer = ""
+
         return
 
     if command_key == "buf send" or command_key.startswith("buf send "):

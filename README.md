@@ -18,6 +18,8 @@ A lightweight Telegram-based remote shell for Linux. It provides a persistent `b
 - Optional output logging to `logs/`
 - Terminal-style screenshots from command output
 - Run commands directly as terminal screenshots
+- Screenshot command runner with optional buffer control
+- Screenshot themes, titles, wide mode and file saving
 - Session output buffer clearing
 - Session output buffer status
 
@@ -102,7 +104,18 @@ These commands use the accumulated output buffer from the current bot session:
 - `$buf tail full`
 - `$shot`
 - `$shot 80`
+- `$shot wide`
+- `$shot wide 80`
+- `$shot clear`
+- `$shot file output.png`
+- `$shot title my-server`
+- `$shot theme green`
+- `$shot theme white`
+- `$shot theme amber`
 - `$shot run neofetch`
+- `$shot run clear neofetch`
+- `$shot run --no-session neofetch`
+- `$shot run file neofetch.png neofetch`
 - `$shot run ls -la`
 - `$buf send`
 - `$buf send output.txt`
