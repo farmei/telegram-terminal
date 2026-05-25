@@ -1,4 +1,4 @@
-# Telegram Remote Shell 
+# telegram-terminal 
  
 A lightweight Telegram-based remote shell for Linux. It provides a persistent `bash` session through Telegram, with live command output, interactive terminal controls, file transfer, and a simple line-based text editor. 
  
@@ -96,20 +96,28 @@ Editor commands:
  
 ## Configuration 
  
-Set your Telegram API credentials in `linux_remote.py`: 
+Set your Telegram API credentials in `telegram-terminal.py`: 
  
 - `api_id = 123456` 
 - `api_hash = "your_api_hash"` 
  
-Get Telegram API credentials from `https://my.telegram.org`. 
+Get Telegram API credentials from `https://my.telegram.org/apps`. 
+ 
+Steps: 
+ 
+- Open `https://my.telegram.org/apps` 
+- Log in with your Telegram phone number 
+- Create an application 
+- Copy the `api_id` and `api_hash` 
+- Put them in `telegram-terminal.py` 
  
 ## Run 
  
 - `source remoteenv/bin/activate` 
-- `python3 linux_remote.py` 
+- `python3 telegram-terminal.py` 
  
 On the first run, Telegram will ask for login confirmation and create a local session file. 
  
 ## License 
  
-MIT
+MIT 
