@@ -330,32 +330,6 @@ def terminal_cells(content, cols, rows):
     return screen
 
 
-def useful_text_count(text):
-    return sum(1 for char in text if char.isalnum() or char in "/._-:@~#$")
-
-
-def screen_text(screen, rows):
-    rendered = []
-
-    for y, line in enumerate(screen.buffer.values()):
-        if y >= rows:
-            break
-
-        rendered.append("".join(char.data for char in line.values()).rstrip())
-
-    return "\n".join(rendered).strip()
-
-
-def draw_plain_terminal(draw, content, font, theme, pad_x, pad_top, cell_height, max_cols, max_lines):
-    clean = clean_output(content).replace("\r", "")
-    lines = clean.splitlines()[-max_lines:]
-    y = pad_top
-
-    for line in lines:
-        draw.text((pad_x, y), line[:max_cols], fill=theme["text"], font=font)
-        y += cell_height
-
-
 async def send_terminal_screenshot(event, content, wide=False, save_path=None):
     if not content.strip():
         content = "Output buffer is empty."
@@ -382,8 +356,7 @@ async def send_terminal_screenshot(event, content, wide=False, save_path=None):
     width = pad_x * 2 + cols * cell_width
     height = pad_top + rows * cell_height + pad_bottom
 
-    normalized_content = content.replace("\r\n", "\n")
-    screen = terminal_cells(normalized_content, cols, rows)
+    screen = terminal_cells(content.replace("\r\n", "\n"), cols, rows)
     image = Image.new("RGB", (width, height), theme["bg"])
     draw = ImageDraw.Draw(image)
 
@@ -397,34 +370,28 @@ async def send_terminal_screenshot(event, content, wide=False, save_path=None):
     default_fg = theme["default_fg"]
     default_bg = theme["bg"]
 
-    rendered_text = screen_text(screen, rows)
-    clean_text = clean_output(normalized_content)
+    for y, line in enumerate(screen.buffer.values()):
+        if y >= rows:
+            break
 
-    if useful_text_count(rendered_text) < max(8, useful_text_count(clean_text) // 12):
-        draw_plain_terminal(draw, normalized_content, font, theme, pad_x, pad_top, cell_height, cols, rows)
-    else:
-        for y, line in enumerate(screen.buffer.values()):
-            if y >= rows:
+        for x, char in enumerate(line.values()):
+            if x >= cols:
                 break
 
-            for x, char in enumerate(line.values()):
-                if x >= cols:
-                    break
+            data = char.data
 
-                data = char.data
+            if not data:
+                continue
 
-                if not data:
-                    continue
+            px = pad_x + x * cell_width
+            py = pad_top + y * cell_height
+            fg = color_to_rgb(char.fg, default_fg)
+            bg = color_to_rgb(char.bg, default_bg)
 
-                px = pad_x + x * cell_width
-                py = pad_top + y * cell_height
-                fg = color_to_rgb(char.fg, default_fg)
-                bg = color_to_rgb(char.bg, default_bg)
+            if bg != default_bg:
+                draw.rectangle((px, py, px + cell_width, py + cell_height), fill=bg)
 
-                if bg != default_bg:
-                    draw.rectangle((px, py, px + cell_width, py + cell_height), fill=bg)
-
-                draw.text((px, py), data, fill=fg, font=font)
+            draw.text((px, py), data, fill=fg, font=font)
 
     if save_path:
         image_path = Path(save_path).expanduser()
@@ -1227,12 +1194,7 @@ async def shell_handler(event):
 
             idx += 1
 
-        if raw_output_buffer:
-            screenshot_content = raw_output_buffer if not tail_arg else select_output_lines(raw_output_buffer, tail_arg)
-        elif output_buffer:
-            screenshot_content = output_buffer if not tail_arg else select_output_lines(output_buffer, tail_arg)
-        else:
-            screenshot_content = tail_output(tail_arg)
+        screenshot_content = select_output_lines(raw_output_buffer or output_buffer, tail_arg) if (raw_output_buffer or output_buffer) else tail_output(tail_arg)
         await send_terminal_screenshot(event, screenshot_content, wide=wide, save_path=save_path)
 
         if clear_after:
