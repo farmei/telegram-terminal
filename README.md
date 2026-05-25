@@ -141,18 +141,23 @@ Large command outputs are still sent automatically as `.txt` files when a comman
 
 ## Installation
 
+Clone the repository:
+
+- `git clone https://github.com/farmei/telegram-terminal.git`
+- `cd telegram-terminal`
+
+Create and activate a virtual environment:
+
 - `python3 -m venv remoteenv`
 - `source remoteenv/bin/activate`
-- `pip install telethon pexpect`
 
-## Configuration
+Install dependencies:
 
-Set your Telegram API credentials in `telegram-terminal.py`:
+- `pip install -r requirements.txt`
 
-- `api_id = 123456`
-- `api_hash = "your_api_hash"`
+## Telegram API Setup
 
-Get Telegram API credentials from `https://my.telegram.org/apps`.
+Get your Telegram API credentials from `https://my.telegram.org/apps`.
 
 Steps:
 
@@ -160,14 +165,26 @@ Steps:
 - Log in with your Telegram phone number
 - Create an application
 - Copy the `api_id` and `api_hash`
-- Put them in `telegram-terminal.py`
+
+Set the credentials in `telegram-terminal.py`:
+
+- `api_id = 123456`
+- `api_hash = "your_api_hash"`
 
 ## Run
+
+Start the bot:
 
 - `source remoteenv/bin/activate`
 - `python3 telegram-terminal.py`
 
-On the first run, Telegram will ask for login confirmation and create a local session file.
+On the first run, Telegram will ask for login confirmation and create a local session file. After login, send commands from your own Telegram account using the `$` prefix.
+
+Example:
+
+- `$tt ping`
+- `$pwd`
+- `$shot run neofetch`
 
 ## License
 
