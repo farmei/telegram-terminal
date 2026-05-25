@@ -17,7 +17,6 @@ A lightweight Telegram-based remote shell for Linux. It provides a persistent `b
 - Command history with rerun support
 - Optional output logging to `logs/`
 - Terminal-style screenshots from command output
-- ANSI color-aware screenshot rendering for colored terminal output
 - Cleaner screenshot rendering with `Pillow` and system monospace fonts
 - Run commands directly as terminal screenshots
 - Screenshot command runner with optional buffer control
@@ -134,8 +133,6 @@ These commands use the accumulated output buffer from the current bot session. `
 - `$buf status`
 
 Large command outputs are still sent automatically as `.txt` files when a command finishes.
-
-`$shot` now keeps ANSI color codes when the command output provides them, so tools like `neofetch` look closer to a real terminal.
 
 Note: interactive terminal apps such as `btop`, `htop`, `nano`, `vim` and similar fullscreen programs may not render correctly in `$shot`. They are best used with static output commands or `$shot run` on non-interactive commands.
 
