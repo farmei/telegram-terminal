@@ -67,41 +67,42 @@ def tg_code(text):
 def build_help():
     return """Telegram shell commands:
 $<command>              Run a shell command
+$tt help               Show telegram-terminal help
+$tt status             Show shell/editor status
+$tt restart            Restart the persistent bash session
 $ctrlc / $ctrl c       Send Ctrl+C
 $ctrld                  Send Ctrl+D
 $ctrlz                  Send Ctrl+Z
 $enter                  Send Enter
 $tab                    Send Tab
 $up/$down/$left/$right  Send arrow keys
-$input <text>           Send one input line
 $key <name>             Send a key: esc, backspace, delete, home, end, pgup, pgdn
-$paste <text>           Paste raw text into the shell
-$restart-shell          Restart the persistent bash session
-$status                 Show shell/editor status
-$tail [lines|full]      Show recent output buffer
-$ss [lines]             Send output as terminal image
-$sscmd <command>        Run command and send output image
-$sendout [file.txt]     Send output buffer as .txt
-$buf clear              Clear output buffer
-$buf status             Show output buffer status
-$history                Show command history
-$last                   Show last shell command
-$rerun N                Run command from history
-$log on/off/status      Save command outputs to logs/
-$get <file>             Send a file from the server
-$edit <file>            Open Telegram text editor
-$nano <file>            Alias for $edit
-$e show                 Show editor buffer
-$e set N <text>         Replace line N
-$e insert N <text>      Insert before line N
-$e append <text>        Append a line
-$e delete N[-M]         Delete line or range
-$e undo                 Undo editor change
-$e find <text>          Find text in open file
-$e replace old new      Replace first match
-$e replace-all old new  Replace all matches
-$e save                 Save file
-$e cancel               Close editor without saving
+$ttpaste <text>         Paste raw text into the shell
+$ttinput <text>         Send one input line
+$buf tail [lines|full] Show recent output buffer
+$buf send [file.txt]   Send output buffer as .txt
+$buf clear             Clear output buffer
+$buf status            Show output buffer status
+$shot [lines]          Send output as terminal image
+$shot run <command>    Run command and send output image
+$cmd history           Show command history
+$cmd last              Show last shell command
+$cmd rerun N           Run command from history
+$out log on/off/status Save command outputs to logs/
+$ttget <file>          Send a file from the server
+$ttput <path>          Upload document to server
+$ttedit open <file>    Open Telegram text editor
+$ttedit show           Show editor buffer
+$ttedit set N <text>   Replace line N
+$ttedit insert N text  Insert before line N
+$ttedit append <text>  Append a line
+$ttedit delete N[-M]   Delete line or range
+$ttedit undo           Undo editor change
+$ttedit find <text>    Find text in open file
+$ttedit replace old new Replace first match
+$ttedit replace-all old new Replace all matches
+$ttedit save           Save file
+$ttedit cancel         Close editor without saving
 
 Send a document with caption "$put <path>" to upload it."""
 
@@ -418,8 +419,28 @@ async def send_terminal_screenshot(event, content):
 async def handle_editor_command(event, command):
     global editor_state
 
-    if command.startswith("edit ") or command.startswith("nano "):
-        _, path_text = command.split(maxsplit=1)
+    if not command.startswith("ttedit"):
+        return False
+
+    rest = command[6:].strip()
+    editor_actions = {
+        "show", "ls", "view", "set", "replace", "insert", "ins", "append", "add",
+        "delete", "del", "rm", "undo", "find", "replace-all", "replaceall", "save",
+        "cancel", "close", "quit",
+    }
+
+    action_name = rest.split(maxsplit=1)[0].lower() if rest else ""
+
+    if rest and (action_name not in editor_actions or action_name == "open"):
+        if action_name == "open":
+            _, _, path_text = rest.partition(" ")
+        else:
+            path_text = rest
+
+        if not path_text:
+            await event.reply(tg_code("Usage: $ttedit open <file>"))
+            return True
+
         path = Path(path_text).expanduser()
 
         try:
@@ -443,14 +464,11 @@ async def handle_editor_command(event, command):
 
         return True
 
-    if not command.startswith("e "):
-        return False
-
     if not editor_state:
-        await event.reply(tg_code("No file is open. Use $edit <file> first."))
+        await event.reply(tg_code("No file is open. Use $ttedit open <file> first."))
         return True
 
-    action_text = command[2:].strip()
+    action_text = rest
 
     if not action_text:
         await event.reply(tg_code(editor_preview()))
@@ -469,7 +487,7 @@ async def handle_editor_command(event, command):
         if action in ("show", "ls", "view"):
             await event.reply(tg_code(editor_preview()))
 
-        elif action in ("set", "replace"):
+        elif action == "set":
             line_text, _, new_text = rest.partition(" ")
             line_no = int(line_text)
 
@@ -509,7 +527,6 @@ async def handle_editor_command(event, command):
             editor_state["dirty"] = True
             await event.reply(tg_code(f"Deleted line(s) {start}-{end}.\n\n{editor_preview()}"))
 
-
         elif action == "undo":
             if not editor_state["undo"]:
                 raise ValueError("nothing to undo")
@@ -522,7 +539,7 @@ async def handle_editor_command(event, command):
             needle = rest
 
             if not needle:
-                raise ValueError("usage: $e find <text>")
+                raise ValueError("usage: $ttedit find <text>")
 
             matches = [f"{idx}: {line}" for idx, line in enumerate(lines, start=1) if needle in line]
             await event.reply(tg_code("\n".join(matches[:80]) if matches else f"No matches: {needle}"))
@@ -531,7 +548,7 @@ async def handle_editor_command(event, command):
             old_text, _, new_text = rest.partition(" ")
 
             if not old_text:
-                raise ValueError("usage: $e replace <old> <new>")
+                raise ValueError("usage: $ttedit replace <old> <new>")
 
             count = 0
             snapshot()
@@ -573,7 +590,6 @@ async def handle_editor_command(event, command):
         await event.reply(tg_code(f"Editor error:\n{e}"))
 
     return True
-
 
 async def send_file(event, command):
     args = split_command_args(command)
@@ -846,16 +862,16 @@ async def shell_handler(event):
 
     current_time = datetime.now().strftime("%H:%M:%S")
 
-    if command_key in ("help", "h", "?"):
+    if command_key == "tt help":
         await event.reply(tg_code(build_help()))
         return
 
-    if command_key == "status":
+    if command_key == "tt status":
         await event.reply(tg_code(shell_status()))
         return
 
-    if command_key == "tail" or command_key.startswith("tail "):
-        tail_arg = command[4:].strip()
+    if command_key == "buf tail" or command_key.startswith("buf tail "):
+        tail_arg = command[8:].strip()
         content = tail_output(tail_arg)
 
         if len(content) > MAX_MESSAGE_OUTPUT:
@@ -870,11 +886,11 @@ async def shell_handler(event):
 
         return
 
-    if command.startswith("sscmd "):
-        command = command[6:].strip()
+    if command.startswith("shot run "):
+        command = command[9:].strip()
 
         if not command:
-            await event.reply(tg_code("Usage: $sscmd <command>"))
+            await event.reply(tg_code("Usage: $shot run <command>"))
             return
 
         command_key = command.lower().replace("+", " ").replace("-", " ")
@@ -882,19 +898,19 @@ async def shell_handler(event):
         command_key = aliases.get(command_key, command_key)
         current_output_mode = "ss"
 
-    elif command_key == "sscmd":
-        await event.reply(tg_code("Usage: $sscmd <command>"))
+    elif command_key == "shot run":
+        await event.reply(tg_code("Usage: $shot run <command>"))
         return
 
-    if command_key == "ss" or command_key.startswith("ss "):
+    if command_key == "shot" or command_key.startswith("shot "):
         args = command.split(maxsplit=1)
         screenshot_arg = args[1] if len(args) > 1 else ""
         await send_terminal_screenshot(event, tail_output(screenshot_arg))
         return
 
-    if command_key == "sendout" or command_key.startswith("sendout "):
-        args = command.split(maxsplit=1)
-        filename = args[1].strip() if len(args) > 1 else "telegram-terminal-buffer.txt"
+    if command_key == "buf send" or command_key.startswith("buf send "):
+        args = command.split(maxsplit=2)
+        filename = args[2].strip() if len(args) > 2 else "telegram-terminal-buffer.txt"
 
         if not filename.endswith(".txt"):
             filename += ".txt"
@@ -922,29 +938,29 @@ async def shell_handler(event):
         return
 
     if command_key.startswith("buf "):
-        await event.reply(tg_code("Usage: $buf status | $buf clear"))
+        await event.reply(tg_code("Usage: $buf status | $buf clear | $buf tail | $buf send"))
         return
 
-    if command_key == "history" or command_key.startswith("history "):
-        args = command.split(maxsplit=1)
+    if command_key == "cmd history" or command_key.startswith("cmd history "):
+        args = command.split(maxsplit=2)
         limit = 30
 
-        if len(args) > 1:
+        if len(args) > 2:
             try:
-                limit = max(1, int(args[1]))
+                limit = max(1, int(args[2]))
             except ValueError:
                 limit = 30
 
         await event.reply(tg_code(history_preview(limit)))
         return
 
-    if command_key == "last":
+    if command_key == "cmd last":
         await event.reply(tg_code(last_command or "No command has been executed yet."))
         return
 
-    if command_key.startswith("rerun "):
+    if command_key.startswith("cmd rerun "):
         try:
-            index = int(command.split(maxsplit=1)[1])
+            index = int(command.split(maxsplit=2)[2])
 
             if index < 1 or index > len(command_history):
                 raise ValueError
@@ -956,11 +972,11 @@ async def shell_handler(event):
 
             await event.reply(tg_code(f"Rerun #{index}:\n{command}"))
         except Exception:
-            await event.reply(tg_code(f"Usage: $rerun N\n\n{history_preview()}"))
+            await event.reply(tg_code(f"Usage: $cmd rerun N\n\n{history_preview()}"))
             return
 
-    if command_key == "log" or command_key.startswith("log "):
-        arg = command[3:].strip().lower()
+    if command_key == "out log" or command_key.startswith("out log "):
+        arg = command[7:].strip().lower()
 
         if arg == "on":
             log_enabled = True
@@ -972,11 +988,11 @@ async def shell_handler(event):
             status = "on" if log_enabled else "off"
             await event.reply(tg_code(f"Logging: {status}"))
         else:
-            await event.reply(tg_code("Usage: $log on | $log off | $log status"))
+            await event.reply(tg_code("Usage: $out log on | $out log off | $out log status"))
 
         return
 
-    if command_key in ("restart shell", "restart-shell"):
+    if command_key in ("tt restart", "tt restart shell"):
         restart_shell()
         output_buffer = ""
         command_output_buffer = ""
@@ -987,11 +1003,11 @@ async def shell_handler(event):
     if await handle_editor_command(event, command):
         return
 
-    if command.startswith("get "):
+    if command.startswith("ttget "):
         await send_file(event, command)
         return
 
-    if command.startswith("put "):
+    if command.startswith("ttput "):
         await receive_file(event, command)
         return
 
@@ -1048,18 +1064,18 @@ async def shell_handler(event):
             await event.reply(tg_code(f"Key Error:\n{e}"))
         return
 
-    if command.startswith("paste "):
+    if command.startswith("ttpaste "):
         try:
-            pasted = command[6:]
+            pasted = command[8:]
             shell.send(pasted)
             await event.reply(tg_code(f"Pasted {len(pasted)} chars"))
         except Exception as e:
             await event.reply(tg_code(f"Paste Error:\n{e}"))
         return
 
-    if command.startswith("input "):
+    if command.startswith("ttinput "):
 
-        user_input = command[6:]
+        user_input = command[8:]
 
         try:
 

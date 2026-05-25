@@ -23,7 +23,7 @@ A lightweight Telegram-based remote shell for Linux. It provides a persistent `b
 
 ## Commands
 
-All commands start with `$`.
+All commands start with `$`. Built-in bot commands use namespaced prefixes like `tt`, `buf`, `cmd`, `out` and `shot`, so normal shell commands such as `$tail file.txt`, `$history`, `$nano`, `$log`, `$get` and `$ss` can still run in the terminal.
 
 ### Run Shell Commands
 
@@ -57,56 +57,55 @@ All commands start with `$`.
 
 ### Send Input
 
-- `$input your text here`
-- `$paste raw text without pressing enter`
+- `$ttinput your text here`
+- `$ttpaste raw text without pressing enter`
 
 ### File Download
 
 Send a file from the server to Telegram:
 
-- `$get /path/to/file.txt`
+- `$ttget /path/to/file.txt`
 
 ### File Upload
 
 Send a Telegram document with this caption:
 
-- `$put /path/to/save/file.txt`
+- `$ttput /path/to/save/file.txt`
 
 ### Text Editor
 
 Open a file:
 
-- `$edit file.txt`
-- `$nano file.txt`
+- `$ttedit open file.txt`
 
 Editor commands:
 
-- `$e show`
-- `$e set 3 new content for line 3`
-- `$e insert 3 inserted before line 3`
-- `$e append new line at the end`
-- `$e delete 5`
-- `$e delete 5-10`
-- `$e undo`
-- `$e find token`
-- `$e replace old new`
-- `$e replace-all old new`
-- `$e save`
-- `$e cancel`
+- `$ttedit show`
+- `$ttedit set 3 new content for line 3`
+- `$ttedit insert 3 inserted before line 3`
+- `$ttedit append new line at the end`
+- `$ttedit delete 5`
+- `$ttedit delete 5-10`
+- `$ttedit undo`
+- `$ttedit find token`
+- `$ttedit replace old new`
+- `$ttedit replace-all old new`
+- `$ttedit save`
+- `$ttedit cancel`
 
 ### Session Output
 
 These commands use the accumulated output buffer from the current bot session:
 
-- `$tail`
-- `$tail 200`
-- `$tail full`
-- `$ss`
-- `$ss 80`
-- `$sscmd neofetch`
-- `$sscmd ls -la`
-- `$sendout`
-- `$sendout output.txt`
+- `$buf tail`
+- `$buf tail 200`
+- `$buf tail full`
+- `$shot`
+- `$shot 80`
+- `$shot run neofetch`
+- `$shot run ls -la`
+- `$buf send`
+- `$buf send output.txt`
 - `$buf clear`
 - `$buf status`
 
@@ -114,16 +113,16 @@ Large command outputs are still sent automatically as `.txt` files when a comman
 
 ### Utility Commands
 
-- `$help`
-- `$status`
-- `$history`
-- `$history 50`
-- `$last`
-- `$rerun 3`
-- `$log on`
-- `$log off`
-- `$log status`
-- `$restart-shell`
+- `$tt help`
+- `$tt status`
+- `$tt restart`
+- `$cmd history`
+- `$cmd history 50`
+- `$cmd last`
+- `$cmd rerun 3`
+- `$out log on`
+- `$out log off`
+- `$out log status`
 
 ## Installation
 
