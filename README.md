@@ -19,6 +19,7 @@ A lightweight Telegram-based remote shell for Linux. It provides a persistent `b
 - Terminal-style screenshots from command output
 - Run commands directly as terminal screenshots
 - Screenshot command runner with optional buffer control
+- Topic-safe screenshot replies in forum groups
 - Screenshot themes, titles, wide mode and file saving
 - Session output buffer clearing without interrupting active commands
 - Output rendering state reset between commands

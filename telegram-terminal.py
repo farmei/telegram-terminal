@@ -38,6 +38,7 @@ shell = pexpect.spawn(
 shell.delaybeforesend = 0
 
 current_msg = None
+current_event = None
 
 output_buffer = ""
 command_output_buffer = ""
@@ -732,6 +733,7 @@ def buffer_status():
 async def stream_shell_output():
 
     global current_msg
+    global current_event
     global output_buffer
     global command_output_buffer
     global output_revision
@@ -799,12 +801,17 @@ async def stream_shell_output():
                                     write_command_log(last_command or "", command_output_buffer, current_log_path)
 
                                 if current_output_mode == "ss":
-                                    await current_msg.delete()
+                                    target_event = current_event or current_msg
                                     await send_terminal_screenshot(
-                                        current_msg,
+                                        target_event,
                                         command_output_buffer,
                                         save_path=current_shot_save_path,
                                     )
+
+                                    try:
+                                        await current_msg.delete()
+                                    except Exception:
+                                        pass
 
                                     if current_shot_clear_after:
                                         output_buffer = ""
@@ -901,6 +908,7 @@ async def stream_shell_output():
 async def shell_handler(event):
 
     global current_msg
+    global current_event
     global output_buffer
     global command_output_buffer
     global output_revision
@@ -1178,6 +1186,7 @@ async def shell_handler(event):
         output_buffer = ""
         command_output_buffer = ""
         current_msg = None
+        current_event = None
         await event.reply(tg_code("Shell restarted."))
         return
 
@@ -1290,6 +1299,7 @@ async def shell_handler(event):
 
     command_output_buffer = ""
     output_revision += 1
+    current_event = event
     current_log_path = create_log_path(command) if log_enabled else None
 
     if current_output_mode == "ss":
