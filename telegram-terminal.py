@@ -80,6 +80,7 @@ $status                 Show shell/editor status
 $tail [lines|full]      Show recent output buffer
 $ss [lines]             Send output as terminal image
 $sendout [file.txt]     Send output buffer as .txt
+$buf clear              Clear output buffer
 $history                Show command history
 $last                   Show last shell command
 $rerun N                Run command from history
@@ -92,6 +93,10 @@ $e set N <text>         Replace line N
 $e insert N <text>      Insert before line N
 $e append <text>        Append a line
 $e delete N[-M]         Delete line or range
+$e undo                 Undo editor change
+$e find <text>          Find text in open file
+$e replace old new      Replace first match
+$e replace-all old new  Replace all matches
 $e save                 Save file
 $e cancel               Close editor without saving
 
@@ -425,6 +430,7 @@ async def handle_editor_command(event, command):
                 "path": path,
                 "lines": lines,
                 "dirty": False,
+                "undo": [],
             }
 
             await event.reply(tg_code(editor_preview()))
@@ -453,6 +459,10 @@ async def handle_editor_command(event, command):
     try:
         lines = editor_state["lines"]
 
+        def snapshot():
+            editor_state["undo"].append(lines.copy())
+            editor_state["undo"] = editor_state["undo"][-20:]
+
         if action in ("show", "ls", "view"):
             await event.reply(tg_code(editor_preview()))
 
@@ -463,6 +473,7 @@ async def handle_editor_command(event, command):
             if line_no < 1 or line_no > len(lines):
                 raise ValueError(f"line must be between 1 and {len(lines)}")
 
+            snapshot()
             lines[line_no - 1] = new_text
             editor_state["dirty"] = True
             await event.reply(tg_code(f"Line {line_no} updated.\n\n{editor_preview()}"))
@@ -474,11 +485,13 @@ async def handle_editor_command(event, command):
             if line_no < 1 or line_no > len(lines) + 1:
                 raise ValueError(f"line must be between 1 and {len(lines) + 1}")
 
+            snapshot()
             lines.insert(line_no - 1, new_text)
             editor_state["dirty"] = True
             await event.reply(tg_code(f"Inserted at line {line_no}.\n\n{editor_preview()}"))
 
         elif action in ("append", "add"):
+            snapshot()
             lines.append(rest)
             editor_state["dirty"] = True
             await event.reply(tg_code(f"Appended at line {len(lines)}.\n\n{editor_preview()}"))
@@ -488,9 +501,52 @@ async def handle_editor_command(event, command):
                 raise ValueError("file is empty")
 
             start, end = parse_line_range(rest, len(lines))
+            snapshot()
             del lines[start - 1:end]
             editor_state["dirty"] = True
             await event.reply(tg_code(f"Deleted line(s) {start}-{end}.\n\n{editor_preview()}"))
+
+
+        elif action == "undo":
+            if not editor_state["undo"]:
+                raise ValueError("nothing to undo")
+
+            editor_state["lines"] = editor_state["undo"].pop()
+            editor_state["dirty"] = True
+            await event.reply(tg_code(f"Undo applied.\n\n{editor_preview()}"))
+
+        elif action == "find":
+            needle = rest
+
+            if not needle:
+                raise ValueError("usage: $e find <text>")
+
+            matches = [f"{idx}: {line}" for idx, line in enumerate(lines, start=1) if needle in line]
+            await event.reply(tg_code("\n".join(matches[:80]) if matches else f"No matches: {needle}"))
+
+        elif action in ("replace", "replace-all", "replaceall"):
+            old_text, _, new_text = rest.partition(" ")
+
+            if not old_text:
+                raise ValueError("usage: $e replace <old> <new>")
+
+            count = 0
+            snapshot()
+
+            for idx, line in enumerate(lines):
+                if old_text in line:
+                    count += line.count(old_text)
+                    lines[idx] = line.replace(old_text, new_text)
+
+                    if action == "replace":
+                        break
+
+            if count == 0:
+                editor_state["undo"].pop()
+                await event.reply(tg_code(f"No matches: {old_text}"))
+            else:
+                editor_state["dirty"] = True
+                await event.reply(tg_code(f"Replaced {count} occurrence(s).\n\n{editor_preview()}"))
 
         elif action == "save":
             path = editor_state["path"]
@@ -800,6 +856,12 @@ async def shell_handler(event):
             Path(filename).name,
             "Output buffer:"
         )
+        return
+
+    if command_key == "buf clear":
+        output_buffer = ""
+        command_output_buffer = ""
+        await event.reply(tg_code("Output buffer cleared."))
         return
 
     if command_key == "history" or command_key.startswith("history "):

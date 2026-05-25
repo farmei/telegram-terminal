@@ -12,10 +12,12 @@ A lightweight Telegram-based remote shell for Linux. It provides a persistent `b
 - Upload files from Telegram to the server
 - Download files from the server to Telegram
 - Built-in Telegram-friendly text editor
+- Editor undo, find and replace commands
 - Shell status and restart commands
 - Command history with rerun support
 - Optional output logging to `logs/`
 - Terminal-style screenshots from command output
+- Session output buffer clearing
 
 ## Commands
 
@@ -83,6 +85,10 @@ Editor commands:
 - `$e append new line at the end`
 - `$e delete 5`
 - `$e delete 5-10`
+- `$e undo`
+- `$e find token`
+- `$e replace old new`
+- `$e replace-all old new`
 - `$e save`
 - `$e cancel`
 
@@ -97,6 +103,7 @@ These commands use the accumulated output buffer from the current bot session:
 - `$ss 80`
 - `$sendout`
 - `$sendout output.txt`
+- `$buf clear`
 
 Large command outputs are still sent automatically as `.txt` files when a command finishes.
 
