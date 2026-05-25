@@ -83,6 +83,7 @@ $ss [lines]             Send output as terminal image
 $sscmd <command>        Run command and send output image
 $sendout [file.txt]     Send output buffer as .txt
 $buf clear              Clear output buffer
+$buf status             Show output buffer status
 $history                Show command history
 $last                   Show last shell command
 $rerun N                Run command from history
@@ -633,6 +634,30 @@ def shell_status():
     return f"Shell: {status}\nEditor: {editor}\nBuffer: {len(output_buffer)} chars"
 
 
+
+def buffer_status():
+    session_lines = len(output_buffer.splitlines()) if output_buffer else 0
+    command_lines = len(command_output_buffer.splitlines()) if command_output_buffer else 0
+    logging = "on" if log_enabled else "off"
+    editor = "none"
+
+    if editor_state:
+        dirty = "modified" if editor_state["dirty"] else "saved"
+        editor = f"{editor_state['path']} ({dirty})"
+
+    log_path = str(current_log_path) if current_log_path else "none"
+    last = last_command or "none"
+
+    return (
+        f"Session buffer: {len(output_buffer)} chars, {session_lines} lines\n"
+        f"Current command buffer: {len(command_output_buffer)} chars, {command_lines} lines\n"
+        f"Last command: {last}\n"
+        f"Logging: {logging}\n"
+        f"Current log: {log_path}\n"
+        f"Editor: {editor}"
+    )
+
+
 async def stream_shell_output():
 
     global current_msg
@@ -886,10 +911,18 @@ async def shell_handler(event):
         )
         return
 
+    if command_key == "buf status":
+        await event.reply(tg_code(buffer_status()))
+        return
+
     if command_key == "buf clear":
         output_buffer = ""
         command_output_buffer = ""
         await event.reply(tg_code("Output buffer cleared."))
+        return
+
+    if command_key.startswith("buf "):
+        await event.reply(tg_code("Usage: $buf status | $buf clear"))
         return
 
     if command_key == "history" or command_key.startswith("history "):

@@ -19,6 +19,7 @@ A lightweight Telegram-based remote shell for Linux. It provides a persistent `b
 - Terminal-style screenshots from command output
 - Run commands directly as terminal screenshots
 - Session output buffer clearing
+- Session output buffer status
 
 ## Commands
 
@@ -107,6 +108,7 @@ These commands use the accumulated output buffer from the current bot session:
 - `$sendout`
 - `$sendout output.txt`
 - `$buf clear`
+- `$buf status`
 
 Large command outputs are still sent automatically as `.txt` files when a command finishes.
 
