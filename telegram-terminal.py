@@ -41,6 +41,7 @@ current_msg = None
 
 output_buffer = ""
 command_output_buffer = ""
+output_revision = 0
 
 editor_state = None
 
@@ -733,6 +734,7 @@ async def stream_shell_output():
     global current_msg
     global output_buffer
     global command_output_buffer
+    global output_revision
     global current_output_mode
     global current_output_no_session
     global current_shot_clear_after
@@ -740,10 +742,16 @@ async def stream_shell_output():
 
     last_edit = 0
     last_text = ""
+    seen_revision = output_revision
 
     while True:
 
         await asyncio.sleep(0.03)
+
+        if seen_revision != output_revision:
+            seen_revision = output_revision
+            last_edit = 0
+            last_text = ""
 
         try:
 
@@ -800,6 +808,7 @@ async def stream_shell_output():
 
                                     if current_shot_clear_after:
                                         output_buffer = ""
+                                        output_revision += 1
 
                                     current_output_mode = "chat"
                                     current_output_no_session = False
@@ -894,6 +903,7 @@ async def shell_handler(event):
     global current_msg
     global output_buffer
     global command_output_buffer
+    global output_revision
     global last_command
     global log_enabled
     global current_log_path
@@ -1075,6 +1085,7 @@ async def shell_handler(event):
 
         if clear_after:
             output_buffer = ""
+            output_revision += 1
 
         return
 
@@ -1103,6 +1114,7 @@ async def shell_handler(event):
 
     if command_key == "buf clear":
         output_buffer = ""
+        output_revision += 1
         await event.reply(tg_code("Session output buffer cleared."))
         return
 
@@ -1277,6 +1289,7 @@ async def shell_handler(event):
     command_history[:] = command_history[-200:]
 
     command_output_buffer = ""
+    output_revision += 1
     current_log_path = create_log_path(command) if log_enabled else None
 
     if current_output_mode == "ss":
