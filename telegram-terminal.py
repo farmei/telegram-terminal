@@ -56,7 +56,6 @@ current_output_mode = "chat"
 current_output_no_session = False
 current_shot_clear_after = False
 current_shot_save_path = None
-current_shot_wide = False
 current_live_delay = None
 current_live_wide = False
 shot_theme = "green"
@@ -364,13 +363,13 @@ async def send_terminal_screenshot(event, content, wide=False, save_path=None):
     theme = SHOT_THEMES.get(shot_theme, SHOT_THEMES["green"])
 
     if wide:
-        cols = 220
-        rows = 60
-        font_size = 14
+        cols = 170
+        rows = 48
+        font_size = 16
     else:
-        cols = 150
-        rows = 46
-        font_size = 15
+        cols = 120
+        rows = 38
+        font_size = 18
 
     font = load_terminal_font(font_size)
     bbox = font.getbbox("M")
@@ -446,7 +445,6 @@ async def finish_live_screenshot(delay):
     global current_output_no_session
     global current_shot_clear_after
     global current_shot_save_path
-    global current_shot_wide
     global current_live_delay
     global current_live_wide
     global current_live_delay
@@ -881,7 +879,6 @@ async def stream_shell_output():
                                     current_output_no_session = False
                                     current_shot_clear_after = False
                                     current_shot_save_path = None
-                                    current_shot_wide = False
                                     current_live_delay = None
                                     current_live_wide = False
                                     last_text = trimmed
@@ -1011,7 +1008,6 @@ async def shell_handler(event):
     global current_output_no_session
     global current_shot_clear_after
     global current_shot_save_path
-    global current_shot_wide
     global current_live_delay
     global current_live_wide
     global shot_theme
@@ -1164,19 +1160,8 @@ async def shell_handler(event):
         current_shot_clear_after = False
         current_output_no_session = False
         current_shot_save_path = None
-        current_shot_wide = True
 
         while True:
-            if run_text.startswith("wide "):
-                current_shot_wide = True
-                run_text = run_text[5:].strip()
-                continue
-
-            if run_text.startswith("normal "):
-                current_shot_wide = False
-                run_text = run_text[7:].strip()
-                continue
-
             if run_text.startswith("clear "):
                 current_shot_clear_after = True
                 run_text = run_text[6:].strip()
