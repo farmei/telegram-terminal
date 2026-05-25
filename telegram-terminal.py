@@ -78,6 +78,7 @@ $restart-shell          Restart the persistent bash session
 $status                 Show shell/editor status
 $tail [lines|full]      Show recent output buffer
 $ss [lines]             Send output as terminal image
+$sendout [file.txt]     Send output buffer as .txt
 $history                Show command history
 $last                   Show last shell command
 $rerun N                Run command from history
@@ -774,6 +775,25 @@ async def shell_handler(event):
         args = command.split(maxsplit=1)
         screenshot_arg = args[1] if len(args) > 1 else ""
         await send_terminal_screenshot(event, tail_output(screenshot_arg))
+        return
+
+    if command_key == "sendout" or command_key.startswith("sendout "):
+        args = command.split(maxsplit=1)
+        filename = args[1].strip() if len(args) > 1 else "telegram-terminal-buffer.txt"
+
+        if not filename.endswith(".txt"):
+            filename += ".txt"
+
+        if not output_buffer:
+            await event.reply(tg_code("Output buffer is empty."))
+            return
+
+        await send_text_file(
+            event,
+            output_buffer,
+            Path(filename).name,
+            "Output buffer:"
+        )
         return
 
     if command_key == "history" or command_key.startswith("history "):

@@ -95,6 +95,8 @@ Editor commands:
 - `$tail full`
 - `$ss`
 - `$ss 80`
+- `$sendout`
+- `$sendout output.txt`
 - `$history`
 - `$history 50`
 - `$last`
