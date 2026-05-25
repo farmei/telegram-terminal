@@ -39,6 +39,7 @@ shell.delaybeforesend = 0
 current_msg = None
 
 output_buffer = ""
+command_output_buffer = ""
 
 editor_state = None
 
@@ -577,6 +578,7 @@ async def stream_shell_output():
 
     global current_msg
     global output_buffer
+    global command_output_buffer
 
     last_edit = 0
     last_text = ""
@@ -610,12 +612,14 @@ async def stream_shell_output():
                         command_finished = True
 
                     output_buffer += cleaned
+                    command_output_buffer += cleaned
 
                     output_buffer = output_buffer[-MAX_BUFFER_SIZE:]
+                    command_output_buffer = command_output_buffer[-MAX_BUFFER_SIZE:]
 
                     now = time.time()
 
-                    trimmed = output_buffer[-MAX_MESSAGE_OUTPUT:]
+                    trimmed = command_output_buffer[-MAX_MESSAGE_OUTPUT:]
 
                     if command_finished:
 
@@ -627,9 +631,9 @@ async def stream_shell_output():
                             try:
 
                                 if current_log_path:
-                                    write_command_log(last_command or "", output_buffer, current_log_path)
+                                    write_command_log(last_command or "", command_output_buffer, current_log_path)
 
-                                if len(output_buffer) > MAX_MESSAGE_OUTPUT:
+                                if len(command_output_buffer) > MAX_MESSAGE_OUTPUT:
                                     suffix = "\n\nOutput is large. Sending full output as .txt..."
 
                                     if current_log_path:
@@ -640,7 +644,7 @@ async def stream_shell_output():
                                     )
                                     await send_text_file(
                                         current_msg,
-                                        output_buffer,
+                                        command_output_buffer,
                                         "telegram-terminal-output.txt",
                                         "Full output:"
                                     )
@@ -710,6 +714,7 @@ async def shell_handler(event):
 
     global current_msg
     global output_buffer
+    global command_output_buffer
     global last_command
     global log_enabled
     global current_log_path
@@ -850,6 +855,7 @@ async def shell_handler(event):
     if command_key in ("restart shell", "restart-shell"):
         restart_shell()
         output_buffer = ""
+        command_output_buffer = ""
         current_msg = None
         await event.reply(tg_code("Shell restarted."))
         return
@@ -961,7 +967,7 @@ async def shell_handler(event):
     command_history.append(command)
     command_history[:] = command_history[-200:]
 
-    output_buffer = ""
+    command_output_buffer = ""
     current_log_path = create_log_path(command) if log_enabled else None
 
     current_msg = await event.reply(
