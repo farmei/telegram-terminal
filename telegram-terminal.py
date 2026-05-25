@@ -22,7 +22,7 @@ client = TelegramClient(
     api_hash
 )
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 EDIT_INTERVAL = 3
 MAX_MESSAGE_OUTPUT = 3500
 MAX_BUFFER_SIZE = 200000

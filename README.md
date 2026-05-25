@@ -189,6 +189,10 @@ Example:
 - `$pwd`
 - `$shot run neofetch`
 
+## Version
+
+Current version: `1.1.0`
+
 ## License
 
 MIT
