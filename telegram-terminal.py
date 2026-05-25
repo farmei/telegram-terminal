@@ -1048,6 +1048,12 @@ async def shell_handler(event):
 
         return
 
+    if command_key == "shot reset":
+        shot_theme = "green"
+        shot_title = "telegram-terminal"
+        await event.reply(tg_code("Screenshot settings reset."))
+        return
+
     if command_key == "shot theme" or command_key.startswith("shot theme "):
         theme = command[10:].strip().lower()
 
@@ -1061,12 +1067,6 @@ async def shell_handler(event):
 
         shot_theme = theme
         await event.reply(tg_code(f"Screenshot theme set to: {shot_theme}"))
-        return
-
-    if command_key == "shot reset":
-        shot_theme = "green"
-        shot_title = "telegram-terminal"
-        await event.reply(tg_code("Screenshot settings reset."))
         return
 
     if command_key == "shot title" or command_key.startswith("shot title "):
