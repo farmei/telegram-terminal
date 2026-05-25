@@ -113,7 +113,7 @@ $ttpaste <text>         Paste raw text into the shell
 $ttinput <text>         Send one input line
 $buf tail [lines|full] Show recent output buffer
 $buf send [file.txt]   Send output buffer as .txt
-$buf clear             Clear output buffer
+$buf clear             Clear session output buffer
 $buf status            Show output buffer status
 $shot [lines]          Send output as terminal image
 $shot wide [lines]     Send wider output image
@@ -800,7 +800,6 @@ async def stream_shell_output():
 
                                     if current_shot_clear_after:
                                         output_buffer = ""
-                                        command_output_buffer = ""
 
                                     current_output_mode = "chat"
                                     current_output_no_session = False
@@ -1076,7 +1075,6 @@ async def shell_handler(event):
 
         if clear_after:
             output_buffer = ""
-            command_output_buffer = ""
 
         return
 
@@ -1105,8 +1103,7 @@ async def shell_handler(event):
 
     if command_key == "buf clear":
         output_buffer = ""
-        command_output_buffer = ""
-        await event.reply(tg_code("Output buffer cleared."))
+        await event.reply(tg_code("Session output buffer cleared."))
         return
 
     if command_key.startswith("buf "):

@@ -20,7 +20,7 @@ A lightweight Telegram-based remote shell for Linux. It provides a persistent `b
 - Run commands directly as terminal screenshots
 - Screenshot command runner with optional buffer control
 - Screenshot themes, titles, wide mode and file saving
-- Session output buffer clearing
+- Session output buffer clearing without interrupting active commands
 - Session output buffer status
 
 ## Commands
@@ -97,7 +97,7 @@ Editor commands:
 
 ### Session Output
 
-These commands use the accumulated output buffer from the current bot session:
+These commands use the accumulated output buffer from the current bot session. `$buf clear` clears only the session buffer and does not interrupt a running command:
 
 - `$buf tail`
 - `$buf tail 200`
