@@ -837,8 +837,10 @@ async def stream_shell_output():
                                     await current_msg.edit(
                                         tg_code(trimmed + suffix)
                                     )
+
+                                    target_event = current_event or current_msg
                                     await send_text_file(
-                                        current_msg,
+                                        target_event,
                                         command_output_buffer,
                                         "telegram-terminal-output.txt",
                                         "Full output:"
