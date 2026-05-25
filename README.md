@@ -15,6 +15,7 @@ A lightweight Telegram-based remote shell for Linux. It provides a persistent `b
 - Shell status and restart commands
 - Command history with rerun support
 - Optional output logging to `logs/`
+- Terminal-style screenshots from command output
 
 ## Commands
 
@@ -92,6 +93,8 @@ Editor commands:
 - `$tail`
 - `$tail 200`
 - `$tail full`
+- `$ss`
+- `$ss 80`
 - `$history`
 - `$history 50`
 - `$last`

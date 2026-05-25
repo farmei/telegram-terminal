@@ -2,7 +2,9 @@ import asyncio
 import time
 import re
 import shlex
+import struct
 import tempfile
+import zlib
 from datetime import datetime
 from pathlib import Path
 
@@ -75,6 +77,7 @@ $paste <text>           Paste raw text into the shell
 $restart-shell          Restart the persistent bash session
 $status                 Show shell/editor status
 $tail [lines|full]      Show recent output buffer
+$ss [lines]             Send output as terminal image
 $history                Show command history
 $last                   Show last shell command
 $rerun N                Run command from history
@@ -203,6 +206,202 @@ async def send_text_file(event, content, filename="telegram-terminal-output.txt"
             final_path.unlink()
         except OSError:
             pass
+
+
+
+FONT_5X7 = {
+    " ": [0, 0, 0, 0, 0, 0, 0],
+    "!": [4, 4, 4, 4, 4, 0, 4],
+    "\"": [10, 10, 10, 0, 0, 0, 0],
+    "#": [10, 10, 31, 10, 31, 10, 10],
+    "$": [4, 15, 20, 14, 5, 30, 4],
+    "%": [24, 25, 2, 4, 8, 19, 3],
+    "&": [12, 18, 20, 8, 21, 18, 13],
+    "'": [4, 4, 8, 0, 0, 0, 0],
+    "(": [2, 4, 8, 8, 8, 4, 2],
+    ")": [8, 4, 2, 2, 2, 4, 8],
+    "*": [0, 4, 21, 14, 21, 4, 0],
+    "+": [0, 4, 4, 31, 4, 4, 0],
+    ",": [0, 0, 0, 0, 4, 4, 8],
+    "-": [0, 0, 0, 31, 0, 0, 0],
+    ".": [0, 0, 0, 0, 0, 12, 12],
+    "/": [1, 2, 4, 8, 16, 0, 0],
+    "0": [14, 17, 19, 21, 25, 17, 14],
+    "1": [4, 12, 4, 4, 4, 4, 14],
+    "2": [14, 17, 1, 2, 4, 8, 31],
+    "3": [30, 1, 1, 14, 1, 1, 30],
+    "4": [2, 6, 10, 18, 31, 2, 2],
+    "5": [31, 16, 16, 30, 1, 1, 30],
+    "6": [14, 16, 16, 30, 17, 17, 14],
+    "7": [31, 1, 2, 4, 8, 8, 8],
+    "8": [14, 17, 17, 14, 17, 17, 14],
+    "9": [14, 17, 17, 15, 1, 1, 14],
+    ":": [0, 12, 12, 0, 12, 12, 0],
+    ";": [0, 12, 12, 0, 4, 4, 8],
+    "<": [2, 4, 8, 16, 8, 4, 2],
+    "=": [0, 0, 31, 0, 31, 0, 0],
+    ">": [8, 4, 2, 1, 2, 4, 8],
+    "?": [14, 17, 1, 2, 4, 0, 4],
+    "@": [14, 17, 1, 13, 21, 21, 14],
+    "A": [14, 17, 17, 31, 17, 17, 17],
+    "B": [30, 17, 17, 30, 17, 17, 30],
+    "C": [14, 17, 16, 16, 16, 17, 14],
+    "D": [30, 17, 17, 17, 17, 17, 30],
+    "E": [31, 16, 16, 30, 16, 16, 31],
+    "F": [31, 16, 16, 30, 16, 16, 16],
+    "G": [14, 17, 16, 23, 17, 17, 14],
+    "H": [17, 17, 17, 31, 17, 17, 17],
+    "I": [14, 4, 4, 4, 4, 4, 14],
+    "J": [7, 2, 2, 2, 18, 18, 12],
+    "K": [17, 18, 20, 24, 20, 18, 17],
+    "L": [16, 16, 16, 16, 16, 16, 31],
+    "M": [17, 27, 21, 21, 17, 17, 17],
+    "N": [17, 25, 21, 19, 17, 17, 17],
+    "O": [14, 17, 17, 17, 17, 17, 14],
+    "P": [30, 17, 17, 30, 16, 16, 16],
+    "Q": [14, 17, 17, 17, 21, 18, 13],
+    "R": [30, 17, 17, 30, 20, 18, 17],
+    "S": [15, 16, 16, 14, 1, 1, 30],
+    "T": [31, 4, 4, 4, 4, 4, 4],
+    "U": [17, 17, 17, 17, 17, 17, 14],
+    "V": [17, 17, 17, 17, 17, 10, 4],
+    "W": [17, 17, 17, 21, 21, 21, 10],
+    "X": [17, 17, 10, 4, 10, 17, 17],
+    "Y": [17, 17, 10, 4, 4, 4, 4],
+    "Z": [31, 1, 2, 4, 8, 16, 31],
+    "[": [14, 8, 8, 8, 8, 8, 14],
+    "\\": [16, 8, 4, 2, 1, 0, 0],
+    "]": [14, 2, 2, 2, 2, 2, 14],
+    "^": [4, 10, 17, 0, 0, 0, 0],
+    "_": [0, 0, 0, 0, 0, 0, 31],
+    "`": [8, 4, 2, 0, 0, 0, 0],
+    "{": [2, 4, 4, 8, 4, 4, 2],
+    "|": [4, 4, 4, 0, 4, 4, 4],
+    "}": [8, 4, 4, 2, 4, 4, 8],
+    "~": [0, 0, 8, 21, 2, 0, 0],
+}
+
+for char in "abcdefghijklmnopqrstuvwxyz":
+    FONT_5X7[char] = FONT_5X7[char.upper()]
+
+
+def png_chunk(kind, data):
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+
+
+def write_png(path, width, height, pixels):
+    raw = bytearray()
+
+    for y in range(height):
+        raw.append(0)
+        start = y * width * 3
+        raw.extend(pixels[start:start + width * 3])
+
+    data = b"\x89PNG\r\n\x1a\n"
+    data += png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+    data += png_chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+    data += png_chunk(b"IEND", b"")
+    path.write_bytes(data)
+
+
+def draw_rect(pixels, width, height, x1, y1, x2, y2, color):
+    x1 = max(0, min(width, x1))
+    x2 = max(0, min(width, x2))
+    y1 = max(0, min(height, y1))
+    y2 = max(0, min(height, y2))
+
+    for y in range(y1, y2):
+        row = y * width * 3
+        for x in range(x1, x2):
+            idx = row + x * 3
+            pixels[idx:idx + 3] = bytes(color)
+
+
+def draw_circle(pixels, width, height, cx, cy, radius, color):
+    rr = radius * radius
+
+    for y in range(cy - radius, cy + radius + 1):
+        if y < 0 or y >= height:
+            continue
+
+        for x in range(cx - radius, cx + radius + 1):
+            if x < 0 or x >= width:
+                continue
+
+            if (x - cx) ** 2 + (y - cy) ** 2 <= rr:
+                idx = (y * width + x) * 3
+                pixels[idx:idx + 3] = bytes(color)
+
+
+def draw_text(pixels, width, height, x, y, text, color, scale=3):
+    cursor_x = x
+    cursor_y = y
+    char_width = 6 * scale
+    line_height = 9 * scale
+
+    for char in text:
+        if char == "\n":
+            cursor_x = x
+            cursor_y += line_height
+            continue
+
+        if char == "\t":
+            cursor_x += char_width * 4
+            continue
+
+        glyph = FONT_5X7.get(char, FONT_5X7.get("?"))
+
+        for gy, row in enumerate(glyph):
+            for gx in range(5):
+                if row & (1 << (4 - gx)):
+                    draw_rect(
+                        pixels,
+                        width,
+                        height,
+                        cursor_x + gx * scale,
+                        cursor_y + gy * scale,
+                        cursor_x + (gx + 1) * scale,
+                        cursor_y + (gy + 1) * scale,
+                        color,
+                    )
+
+        cursor_x += char_width
+
+        if cursor_x > width - char_width:
+            cursor_x = x
+            cursor_y += line_height
+
+        if cursor_y > height - line_height:
+            break
+
+
+async def send_terminal_screenshot(event, content):
+    if not content.strip():
+        content = "Output buffer is empty."
+
+    content = clean_output(content).replace("\r", "")
+    lines = content.splitlines()[-30:]
+    cropped = []
+
+    for line in lines:
+        cropped.append(line[:116])
+
+    content = "\n".join(cropped)
+    width = 1280
+    height = 760
+    pixels = bytearray(bytes((5, 5, 5)) * width * height)
+
+    draw_rect(pixels, width, height, 0, 0, width, 58, (31, 41, 51))
+    draw_circle(pixels, width, height, 30, 29, 9, (255, 95, 87))
+    draw_circle(pixels, width, height, 62, 29, 9, (255, 189, 46))
+    draw_circle(pixels, width, height, 94, 29, 9, (40, 200, 64))
+    draw_text(pixels, width, height, 128, 20, "telegram-terminal", (216, 222, 233), scale=3)
+    draw_text(pixels, width, height, 38, 92, content, (216, 255, 224), scale=3)
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        image_path = Path(tmp_dir) / "telegram-terminal.png"
+        write_png(image_path, width, height, pixels)
+        await event.reply("Terminal screenshot:", file=str(image_path))
 
 
 async def handle_editor_command(event, command):
@@ -569,6 +768,12 @@ async def shell_handler(event):
         else:
             await event.reply(tg_code(content))
 
+        return
+
+    if command_key == "ss" or command_key.startswith("ss "):
+        args = command.split(maxsplit=1)
+        screenshot_arg = args[1] if len(args) > 1 else ""
+        await send_terminal_screenshot(event, tail_output(screenshot_arg))
         return
 
     if command_key == "history" or command_key.startswith("history "):
