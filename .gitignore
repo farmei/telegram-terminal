@@ -1,0 +1,7 @@
+remoteenv/
+__pycache__/
+*.pyc
+*.session
+*.session-journal
+.env
+logs/

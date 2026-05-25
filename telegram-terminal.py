@@ -40,6 +40,11 @@ output_buffer = ""
 
 editor_state = None
 
+command_history = []
+last_command = None
+log_enabled = False
+current_log_path = None
+
 ansi_escape = re.compile(
     r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])'
 )
@@ -70,6 +75,10 @@ $paste <text>           Paste raw text into the shell
 $restart-shell          Restart the persistent bash session
 $status                 Show shell/editor status
 $tail [lines|full]      Show recent output buffer
+$history                Show command history
+$last                   Show last shell command
+$rerun N                Run command from history
+$log on/off/status      Save command outputs to logs/
 $get <file>             Send a file from the server
 $edit <file>            Open Telegram text editor
 $nano <file>            Alias for $edit
@@ -147,6 +156,36 @@ def tail_output(arg=""):
         line_count = 80
 
     return "\n".join(output_buffer.splitlines()[-line_count:])
+
+
+
+def history_preview(limit=30):
+    if not command_history:
+        return "History is empty."
+
+    items = command_history[-limit:]
+    offset = len(command_history) - len(items)
+    return "\n".join(f"{offset + idx + 1}: {cmd}" for idx, cmd in enumerate(items))
+
+
+def create_log_path(command):
+    logs_dir = Path("logs")
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = re.sub(r"[^a-zA-Z0-9_.-]+", "_", command.strip())[:60].strip("_")
+
+    if not safe_name:
+        safe_name = "command"
+
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return logs_dir / f"{stamp}-{safe_name}.txt"
+
+
+def write_command_log(command, content, path):
+    if not path:
+        return
+
+    header = f"Command: {command}\nTime: {datetime.now().isoformat(timespec='seconds')}\n\n"
+    path.write_text(header + content, encoding="utf-8", errors="replace")
 
 
 async def send_text_file(event, content, filename="telegram-terminal-output.txt", message="Output attached as text file."):
@@ -387,9 +426,17 @@ async def stream_shell_output():
 
                             try:
 
+                                if current_log_path:
+                                    write_command_log(last_command or "", output_buffer, current_log_path)
+
                                 if len(output_buffer) > MAX_MESSAGE_OUTPUT:
+                                    suffix = "\n\nOutput is large. Sending full output as .txt..."
+
+                                    if current_log_path:
+                                        suffix += f"\nLog saved: {current_log_path}"
+
                                     await current_msg.edit(
-                                        tg_code(trimmed + "\n\nOutput is large. Sending full output as .txt...")
+                                        tg_code(trimmed + suffix)
                                     )
                                     await send_text_file(
                                         current_msg,
@@ -398,8 +445,9 @@ async def stream_shell_output():
                                         "Full output:"
                                     )
                                 else:
+                                    suffix = f"\n\nLog saved: {current_log_path}" if current_log_path else ""
                                     await current_msg.edit(
-                                        tg_code(trimmed)
+                                        tg_code(trimmed + suffix)
                                     )
 
                                 last_text = trimmed
@@ -462,6 +510,9 @@ async def shell_handler(event):
 
     global current_msg
     global output_buffer
+    global last_command
+    global log_enabled
+    global current_log_path
 
     if not event.out:
         return
@@ -517,6 +568,57 @@ async def shell_handler(event):
             )
         else:
             await event.reply(tg_code(content))
+
+        return
+
+    if command_key == "history" or command_key.startswith("history "):
+        args = command.split(maxsplit=1)
+        limit = 30
+
+        if len(args) > 1:
+            try:
+                limit = max(1, int(args[1]))
+            except ValueError:
+                limit = 30
+
+        await event.reply(tg_code(history_preview(limit)))
+        return
+
+    if command_key == "last":
+        await event.reply(tg_code(last_command or "No command has been executed yet."))
+        return
+
+    if command_key.startswith("rerun "):
+        try:
+            index = int(command.split(maxsplit=1)[1])
+
+            if index < 1 or index > len(command_history):
+                raise ValueError
+
+            command = command_history[index - 1]
+            command_key = command.lower().replace("+", " ").replace("-", " ")
+            command_key = " ".join(command_key.split())
+            command_key = aliases.get(command_key, command_key)
+
+            await event.reply(tg_code(f"Rerun #{index}:\n{command}"))
+        except Exception:
+            await event.reply(tg_code(f"Usage: $rerun N\n\n{history_preview()}"))
+            return
+
+    if command_key == "log" or command_key.startswith("log "):
+        arg = command[3:].strip().lower()
+
+        if arg == "on":
+            log_enabled = True
+            await event.reply(tg_code("Logging enabled. Outputs will be saved in logs/."))
+        elif arg == "off":
+            log_enabled = False
+            await event.reply(tg_code("Logging disabled."))
+        elif arg == "status" or not arg:
+            status = "on" if log_enabled else "off"
+            await event.reply(tg_code(f"Logging: {status}"))
+        else:
+            await event.reply(tg_code("Usage: $log on | $log off | $log status"))
 
         return
 
@@ -630,7 +732,12 @@ async def shell_handler(event):
         f"You Executed: {command}"
     )
 
+    last_command = command
+    command_history.append(command)
+    command_history[:] = command_history[-200:]
+
     output_buffer = ""
+    current_log_path = create_log_path(command) if log_enabled else None
 
     current_msg = await event.reply(
         tg_code(f"Running:\n{command}")

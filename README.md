@@ -13,6 +13,8 @@ A lightweight Telegram-based remote shell for Linux. It provides a persistent `b
 - Download files from the server to Telegram
 - Built-in Telegram-friendly text editor
 - Shell status and restart commands
+- Command history with rerun support
+- Optional output logging to `logs/`
 
 ## Commands
 
@@ -90,6 +92,13 @@ Editor commands:
 - `$tail`
 - `$tail 200`
 - `$tail full`
+- `$history`
+- `$history 50`
+- `$last`
+- `$rerun 3`
+- `$log on`
+- `$log off`
+- `$log status`
 - `$restart-shell`
 
 ## Installation
