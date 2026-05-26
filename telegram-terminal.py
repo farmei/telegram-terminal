@@ -32,6 +32,8 @@ MAX_MESSAGE_OUTPUT = 3500
 MAX_BUFFER_SIZE = 200000
 TERM_COLUMNS = 160
 TERM_LINES = 44
+TERM_SCROLLBACK = 400
+SHOT_RENDER_ROWS = 76
 
 DONE_MARKER = "__TCM_DONE_982741__"
 
@@ -44,7 +46,7 @@ shell = pexpect.spawn(
 )
 
 shell.delaybeforesend = 0
-terminal_screen = pyte.Screen(TERM_COLUMNS, TERM_LINES)
+terminal_screen = pyte.HistoryScreen(TERM_COLUMNS, TERM_LINES, history=TERM_SCROLLBACK)
 terminal_stream = pyte.Stream(terminal_screen)
 
 current_msg = None
@@ -586,19 +588,37 @@ def terminal_cell(screen, row, col):
     return line.get(col)
 
 
+def screen_rows(screen):
+    rows = []
+    history = getattr(screen, "history", None)
+
+    if history is not None:
+        rows.extend(list(history.top))
+
+    rows.extend(screen.buffer.get(row, {}) for row in range(screen.lines))
+    return rows
+
+
+def row_has_text(row):
+    return any(getattr(cell, "data", " ") != " " for cell in row.values())
+
+
 def terminal_has_text(screen=None):
     screen = screen or terminal_screen
-
-    for row in range(screen.lines):
-        for col in range(screen.columns):
-            cell = terminal_cell(screen, row, col)
-            if cell and getattr(cell, "data", " ") != " ":
-                return True
-    return False
+    return any(row_has_text(row) for row in screen_rows(screen))
 
 
 def terminal_snapshot_lines():
-    return [line.rstrip() for line in terminal_screen.display]
+    lines = []
+
+    for row in screen_rows(terminal_screen):
+        chars = []
+        for col in range(terminal_screen.columns):
+            cell = row.get(col)
+            chars.append(getattr(cell, "data", " ") if cell else " ")
+        lines.append("".join(chars).rstrip())
+
+    return lines
 
 
 def feed_terminal_screen(data):
@@ -615,7 +635,7 @@ def reset_terminal_screen():
     global terminal_screen
     global terminal_stream
 
-    terminal_screen = pyte.Screen(TERM_COLUMNS, TERM_LINES)
+    terminal_screen = pyte.HistoryScreen(TERM_COLUMNS, TERM_LINES, history=TERM_SCROLLBACK)
     terminal_stream = pyte.Stream(terminal_screen)
 
 
@@ -656,7 +676,7 @@ def feed_terminal_prompt(command):
 
 
 def fallback_text_to_screen(content):
-    screen = pyte.Screen(TERM_COLUMNS, TERM_LINES)
+    screen = pyte.HistoryScreen(TERM_COLUMNS, TERM_LINES, history=TERM_SCROLLBACK)
     stream = pyte.Stream(screen)
     stream.feed(clean_output(content).replace("\r", ""))
     return screen
@@ -672,7 +692,10 @@ async def send_terminal_screenshot(event, content, wide=False, save_path=None, u
         screen = fallback_text_to_screen(content or "Output buffer is empty.")
 
     cols = screen.columns
-    rows = screen.lines
+    rendered_rows = screen_rows(screen)
+    max_rows = SHOT_RENDER_ROWS if wide else min(SHOT_RENDER_ROWS, 64)
+    rendered_rows = rendered_rows[-max_rows:]
+    rows = len(rendered_rows) or screen.lines
     font_size = 16 if wide else 17
     font = load_terminal_font(font_size)
     title_font = load_terminal_font(16)
@@ -695,10 +718,10 @@ async def send_terminal_screenshot(event, content, wide=False, save_path=None, u
     draw.ellipse((78, 20, 94, 36), fill=(40, 200, 64))
     draw.text((120, 18), shot_title[:80], fill=theme["title"], font=title_font)
 
-    for row in range(rows):
-        y = pad_top + row * cell_height
+    for row_index, row_data in enumerate(rendered_rows):
+        y = pad_top + row_index * cell_height
         for col in range(cols):
-            cell = terminal_cell(screen, row, col)
+            cell = row_data.get(col)
             if not cell:
                 continue
 
@@ -727,9 +750,12 @@ async def send_terminal_screenshot(event, content, wide=False, save_path=None, u
                 draw.line((x, y + cell_height - 3, x + cell_width, y + cell_height - 3), fill=fg)
 
     cursor = getattr(screen, "cursor", None)
-    if cursor and getattr(cursor, "hidden", False) is False:
+    screen_start = max(0, len(rendered_rows) - screen.lines)
+    cursor_row = screen_start + getattr(cursor, "y", 0) if cursor else -1
+
+    if cursor and getattr(cursor, "hidden", False) is False and 0 <= cursor_row < rows:
         cursor_x = pad_x + min(max(cursor.x, 0), cols - 1) * cell_width
-        cursor_y = pad_top + min(max(cursor.y, 0), rows - 1) * cell_height
+        cursor_y = pad_top + cursor_row * cell_height
         draw.rectangle((cursor_x, cursor_y + cell_height - 4, cursor_x + cell_width, cursor_y + cell_height - 2), fill=theme["text"])
 
     if save_path:
@@ -974,7 +1000,7 @@ def restart_shell():
         env={**os.environ, "TERM": "xterm-256color"}
     )
     shell.delaybeforesend = 0
-    terminal_screen = pyte.Screen(TERM_COLUMNS, TERM_LINES)
+    terminal_screen = pyte.HistoryScreen(TERM_COLUMNS, TERM_LINES, history=TERM_SCROLLBACK)
     terminal_stream = pyte.Stream(terminal_screen)
 
 

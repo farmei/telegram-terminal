@@ -129,7 +129,7 @@ These commands use the accumulated output buffer from the current bot session. `
 
 Large command outputs are sent automatically as full `.txt` files when a command finishes, and file replies stay in the original topic in forum groups.
 
-`$shot` renders the current xterm-compatible virtual screen, including ANSI colors, cursor movement, clears and fullscreen terminal layouts. `$shot run` appends to the existing virtual screen like a normal terminal; use `$buf clear` or `$shot clear` when you want a clean screen. Apps like `btop`, `htop`, `nano` and `vim` can now produce a much closer static screenshot, but Telegram still receives a still PNG, not a live updating terminal view.
+`$shot` renders the current xterm-compatible virtual screen with scrollback, including ANSI colors, cursor movement, clears and fullscreen terminal layouts. `$shot run` appends to the existing virtual screen like a normal terminal; use `$buf clear` or `$shot clear` when you want a clean screen. Apps like `btop`, `htop`, `nano` and `vim` can now produce a much closer static screenshot, but Telegram still receives a still PNG, not a live updating terminal view.
 
 ### Utility Commands
 
