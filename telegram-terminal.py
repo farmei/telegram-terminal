@@ -90,6 +90,7 @@ shot_theme = "green"
 shot_title = "telegram-terminal"
 shell_cwd = Path.cwd()
 terminal_waiting_prompt = False
+terminal_external_prompt = False
 started_at = time.time()
 truetype_available = True
 truetype_warning_shown = False
@@ -358,6 +359,7 @@ def reset_runtime_state():
     global current_command_started_at
     global current_command_last_activity
     global terminal_waiting_prompt
+    global terminal_external_prompt
 
     current_msg = None
     current_event = None
@@ -372,6 +374,7 @@ def reset_runtime_state():
     current_command_started_at = None
     current_command_last_activity = None
     terminal_waiting_prompt = False
+    terminal_external_prompt = False
     output_revision += 1
 
 
@@ -757,10 +760,12 @@ def reset_terminal_screen():
     global terminal_screen
     global terminal_stream
     global terminal_waiting_prompt
+    global terminal_external_prompt
 
     terminal_screen = pyte.HistoryScreen(TERM_COLUMNS, TERM_LINES, history=TERM_SCROLLBACK)
     terminal_stream = pyte.Stream(terminal_screen)
     terminal_waiting_prompt = False
+    terminal_external_prompt = False
 
 
 def short_cwd(path):
@@ -1115,6 +1120,7 @@ def restart_shell():
     global terminal_screen
     global terminal_stream
     global terminal_waiting_prompt
+    global terminal_external_prompt
 
     try:
         if shell.isalive():
@@ -1126,6 +1132,7 @@ def restart_shell():
     terminal_screen = pyte.HistoryScreen(TERM_COLUMNS, TERM_LINES, history=TERM_SCROLLBACK)
     terminal_stream = pyte.Stream(terminal_screen)
     terminal_waiting_prompt = False
+    terminal_external_prompt = False
 
 
 async def shell_watchdog():
@@ -1170,6 +1177,35 @@ async def shell_watchdog():
 
         except Exception as e:
             print(f"Watchdog Error: {e}")
+
+
+def is_interactive_shell_command(command):
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        parts = command.split()
+
+    if not parts:
+        return False
+
+    name = parts[0]
+
+    if name in {"su", "ssh", "login"}:
+        return True
+
+    if name == "sudo" and any(arg in {"-i", "-s", "su"} for arg in parts[1:]):
+        return True
+
+    return False
+
+
+def is_shell_exit_command(command):
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        parts = command.split()
+
+    return bool(parts) and parts[0] in {"exit", "logout"}
 
 
 def shell_status():
@@ -1285,6 +1321,7 @@ async def stream_shell_output():
     global current_command_started_at
     global current_command_last_activity
     global terminal_waiting_prompt
+    global terminal_external_prompt
 
     last_edit = 0
     last_text = ""
@@ -1335,8 +1372,11 @@ async def stream_shell_output():
                     trimmed = command_message_preview()
 
                     if command_finished:
-                        feed_terminal_prompt(newline=False)
-                        terminal_waiting_prompt = True
+                        if not terminal_external_prompt:
+                            feed_terminal_prompt(newline=False)
+                            terminal_waiting_prompt = True
+                        else:
+                            terminal_waiting_prompt = False
 
                         if current_msg:
 
@@ -1491,6 +1531,7 @@ async def shell_handler(event):
     global current_command_started_at
     global current_command_last_activity
     global terminal_waiting_prompt
+    global terminal_external_prompt
     global shot_theme
     global shot_title
 
@@ -1879,15 +1920,62 @@ async def shell_handler(event):
                 f"Input: {user_input}"
             )
 
-            await event.reply(
-                tg_code(f"Input Sent:\n{user_input}")
-            )
+            if terminal_external_prompt:
+                await event.reply(tg_code("Input sent"))
+            else:
+                await event.reply(
+                    tg_code(f"Input Sent:\n{user_input}")
+                )
 
         except Exception as e:
 
             await event.reply(
                 tg_code(f"Input Error:\n{e}")
             )
+
+        return
+
+    if is_interactive_shell_command(command) or (terminal_external_prompt and is_shell_exit_command(command)):
+        print(
+            f"[{current_time}] "
+            f"Interactive: {command}"
+        )
+
+        last_command = command
+        command_history.append(command)
+        command_history[:] = command_history[-200:]
+        command_output_buffer = ""
+        command_file_output_buffer = ""
+        output_revision += 1
+        current_event = event
+
+        if not terminal_external_prompt:
+            # Interactive commands such as su/ssh own the prompt after this point.
+            # Start their virtual screen clean so old local prompts do not mix with
+            # the real remote/user prompt.
+            reset_terminal_screen()
+        terminal_waiting_prompt = False
+
+        current_command_started_at = None
+        current_command_last_activity = None
+        current_msg = None
+
+        try:
+            shell.sendline(command)
+            terminal_external_prompt = not is_shell_exit_command(command)
+
+            if current_output_mode == "ss":
+                await asyncio.sleep(1)
+                await send_terminal_screenshot(event, command_output_buffer, wide=current_shot_wide, save_path=current_shot_save_path)
+                current_output_mode = "chat"
+                current_output_no_session = False
+                current_shot_clear_after = False
+                current_shot_save_path = None
+                current_shot_wide = False
+            else:
+                await event.reply(tg_code("Interactive command sent"))
+        except Exception as e:
+            await event.reply(tg_code(f"Interactive Error:\n{e}"))
 
         return
 
@@ -1905,7 +1993,8 @@ async def shell_handler(event):
     output_revision += 1
     current_event = event
 
-    feed_terminal_prompt(command, replace_current=terminal_waiting_prompt)
+    if not terminal_external_prompt:
+        feed_terminal_prompt(command, replace_current=terminal_waiting_prompt)
     terminal_waiting_prompt = False
     update_shell_cwd(command)
     current_command_started_at = time.time()
