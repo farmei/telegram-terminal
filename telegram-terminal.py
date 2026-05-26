@@ -104,9 +104,9 @@ SHELL_WATCHDOG_POLL_INTERVAL = 10
 SHOT_THEMES = {
     "black": {
         "bg": (0, 0, 0),
-        "bar": (0, 0, 0),
-        "line": (32, 32, 32),
-        "title": (230, 230, 230),
+        "bar": (24, 30, 39),
+        "line": (42, 52, 65),
+        "title": (226, 232, 240),
         "text": (235, 235, 235),
         "cursor": (235, 235, 235),
         "cursor_text": (0, 0, 0),
