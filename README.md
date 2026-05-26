@@ -23,6 +23,7 @@ A lightweight Telegram-based remote shell for Linux. It provides a persistent `b
 - Topic-safe large output file replies in forum groups
 - Screenshot themes, titles, wide mode and file saving
 - Better screenshots for fullscreen terminal apps such as `htop`, `btop`, `nano` and `vim`
+- Screenshots include the executed command prompt with user, host and directory
 - Session output buffer clearing without interrupting active commands
 - Output rendering state reset between commands
 - Session output buffer status
@@ -206,7 +207,7 @@ Example:
 
 ## Version
 
-Current version: `1.1.0`
+Current version: `1.2.0`
 
 ## License
 

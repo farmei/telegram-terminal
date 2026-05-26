@@ -1,5 +1,6 @@
 import asyncio
 import os
+import socket
 import time
 import re
 import shlex
@@ -25,7 +26,7 @@ client = TelegramClient(
     api_hash
 )
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 EDIT_INTERVAL = 3
 MAX_MESSAGE_OUTPUT = 3500
 MAX_BUFFER_SIZE = 200000
@@ -68,6 +69,7 @@ current_command_started_at = None
 current_command_last_activity = None
 shot_theme = "green"
 shot_title = "telegram-terminal"
+shell_cwd = Path.cwd()
 started_at = time.time()
 
 SHELL_WATCHDOG_IDLE_TIMEOUT = 1800
@@ -596,6 +598,42 @@ def reset_terminal_screen():
 
     terminal_screen = pyte.Screen(TERM_COLUMNS, TERM_LINES)
     terminal_stream = pyte.Stream(terminal_screen)
+
+
+def short_cwd(path):
+    home = Path.home()
+
+    try:
+        return "~" + str(path.relative_to(home.parent / home.name)) if path == home else "~/" + str(path.relative_to(home))
+    except ValueError:
+        return str(path)
+
+
+def update_shell_cwd(command):
+    global shell_cwd
+
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return
+
+    if not parts or parts[0] != "cd":
+        return
+
+    target = Path.home() if len(parts) == 1 else Path(parts[1]).expanduser()
+
+    if not target.is_absolute():
+        target = shell_cwd / target
+
+    shell_cwd = target.resolve(strict=False)
+
+
+def feed_terminal_prompt(command):
+    user = os.environ.get("USER") or "user"
+    host = socket.gethostname().split(".")[0]
+    cwd = short_cwd(shell_cwd)
+    prompt = f"\x1b[1;32m{user}@{host}\x1b[0m:\x1b[1;34m{cwd}\x1b[0m$ {command}\r\n"
+    feed_terminal_screen(prompt)
 
 
 def fallback_text_to_screen(content):
@@ -1683,6 +1721,8 @@ async def shell_handler(event):
         f"You Executed: {command}"
     )
 
+    update_shell_cwd(command)
+
     last_command = command
     command_history.append(command)
     command_history[:] = command_history[-200:]
@@ -1690,6 +1730,9 @@ async def shell_handler(event):
     command_output_buffer = ""
     output_revision += 1
     current_event = event
+
+    reset_terminal_screen()
+    feed_terminal_prompt(command)
     current_command_started_at = time.time()
     current_command_last_activity = current_command_started_at
     current_log_path = create_log_path(command) if log_enabled else None
