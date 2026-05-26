@@ -1320,6 +1320,7 @@ async def stream_shell_output():
     last_edit = 0
     last_text = ""
     seen_revision = output_revision
+    pending_raw_data = ""
 
     while True:
 
@@ -1341,12 +1342,22 @@ async def stream_shell_output():
 
                 if data:
 
-                    raw_data = data
+                    pending_raw_data += data
                     command_finished = False
 
-                    if DONE_MARKER in raw_data:
-                        raw_data = raw_data.replace(DONE_MARKER, "")
+                    if DONE_MARKER in pending_raw_data:
+                        before_marker, after_marker = pending_raw_data.split(DONE_MARKER, 1)
+                        raw_data = before_marker + after_marker
+                        pending_raw_data = ""
                         command_finished = True
+                    else:
+                        keep = max(0, len(DONE_MARKER) - 1)
+
+                        if len(pending_raw_data) <= keep:
+                            continue
+
+                        raw_data = pending_raw_data[:-keep]
+                        pending_raw_data = pending_raw_data[-keep:]
 
                     feed_terminal_screen(raw_data)
                     cleaned = clean_output(raw_data)
@@ -1410,9 +1421,6 @@ async def stream_shell_output():
                                     last_edit = now
                                     continue
 
-                                if trimmed == last_text:
-                                    continue
-
                                 if len(command_file_output_buffer) > MAX_MESSAGE_OUTPUT:
                                     suffix = "\n\nOutput is large. Sending full output as .txt..."
 
@@ -1435,9 +1443,11 @@ async def stream_shell_output():
                                     )
                                 else:
                                     suffix = f"\n\nLog saved: {current_log_path}" if current_log_path else ""
-                                    await current_msg.edit(
-                                        tg_code(trimmed + suffix)
-                                    )
+
+                                    if trimmed != last_text or suffix:
+                                        await current_msg.edit(
+                                            tg_code(trimmed + suffix)
+                                        )
 
                                 current_msg = None
                                 current_event = None
@@ -1498,6 +1508,7 @@ async def stream_shell_output():
             print("Shell EOF; restarting shell")
             restart_shell()
             reset_runtime_state()
+            pending_raw_data = ""
             last_text = ""
             last_edit = 0
 
