@@ -28,10 +28,10 @@ All commands start with `$`. Built-in commands use namespaced prefixes like `tt`
 
 ### Terminal Keys
 
-- `$ctrlc`, `$ctrl c`, `$ctrld`, `$ctrlz`
+- `$ctrlc`, `$ctrl c`, `$ctrlb`, `$ctrl b`, `$ctrla`, `$ctrl a`, `$ctrld`, `$ctrlz`
 - `$enter`, `$tab`
 - `$up`, `$down`, `$left`, `$right`
-- `$key esc`, `$key backspace`, `$key delete`, `$key home`, `$key end`, `$key pgup`, `$key pgdn`
+- `$key esc`, `$key backspace`, `$key delete`, `$key home`, `$key end`, `$key pgup`, `$key pgdn`, `$key space`, `$key f1` ... `$key f12`
 
 ### Screenshots
 
@@ -42,8 +42,11 @@ All commands start with `$`. Built-in commands use namespaced prefixes like `tt`
 - `$shot run wide btop`
 - `$shot run clear neofetch`
 - `$shot run --no-session neofetch`
+- `$shot theme black`, `$shot theme green`, `$shot theme white`, `$shot theme amber`
+- `$shot title my-server`
+- `$tt size 120x36`
 
-`$shot` renders the current xterm-compatible virtual screen with scrollback. `$shot run` appends to the existing virtual screen like a normal terminal; use `$buf clear` or `$shot clear` when you want a clean screen.
+`$shot` renders the current xterm-compatible virtual screen with scrollback. The default screenshot theme is pure black. `$shot run` appends to the existing virtual screen like a normal terminal; use `$buf clear` or `$shot clear` when you want a clean screen. Use `$tt size COLSxROWS` before opening full-screen programs such as `tmux`, `vim`, `top` or `btop` when you want a different pty size.
 
 ### Buffers
 
@@ -209,7 +212,7 @@ Example:
 
 ## Version
 
-Current version: `1.2.0`
+Current version: `1.3.0`
 
 ## License
 

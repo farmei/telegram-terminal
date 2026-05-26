@@ -26,7 +26,7 @@ client = TelegramClient(
     api_hash
 )
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 BASE_DIR = Path(__file__).resolve().parent
 EDIT_INTERVAL = 3
 MAX_MESSAGE_OUTPUT = 3900
@@ -37,6 +37,7 @@ TERM_SCROLLBACK = 400
 SHOT_RENDER_ROWS = 76
 
 DONE_MARKER = "__TCM_DONE_982741__"
+MARKER_HOLD_SIZE = len(DONE_MARKER) - 1
 
 
 def spawn_shell():
@@ -84,9 +85,11 @@ current_output_no_session = False
 current_shot_clear_after = False
 current_shot_save_path = None
 current_shot_wide = False
+current_shot_command = None
 current_command_started_at = None
 current_command_last_activity = None
-shot_theme = "green"
+pending_shell_data = ""
+shot_theme = "black"
 shot_title = "telegram-terminal"
 shell_cwd = Path.cwd()
 terminal_waiting_prompt = False
@@ -99,26 +102,41 @@ SHELL_WATCHDOG_IDLE_TIMEOUT = 1800
 SHELL_WATCHDOG_POLL_INTERVAL = 10
 
 SHOT_THEMES = {
+    "black": {
+        "bg": (0, 0, 0),
+        "bar": (0, 0, 0),
+        "line": (32, 32, 32),
+        "title": (230, 230, 230),
+        "text": (235, 235, 235),
+        "cursor": (235, 235, 235),
+        "cursor_text": (0, 0, 0),
+    },
     "green": {
-        "bg": (8, 11, 16),
-        "bar": (24, 30, 39),
-        "line": (42, 52, 65),
+        "bg": (0, 0, 0),
+        "bar": (0, 0, 0),
+        "line": (28, 48, 34),
         "title": (226, 232, 240),
         "text": (220, 255, 226),
+        "cursor": (220, 255, 226),
+        "cursor_text": (0, 0, 0),
     },
     "white": {
-        "bg": (10, 14, 20),
-        "bar": (28, 34, 44),
-        "line": (58, 67, 82),
+        "bg": (0, 0, 0),
+        "bar": (0, 0, 0),
+        "line": (42, 42, 42),
         "title": (238, 242, 247),
         "text": (235, 239, 245),
+        "cursor": (235, 239, 245),
+        "cursor_text": (0, 0, 0),
     },
     "amber": {
-        "bg": (16, 12, 5),
-        "bar": (42, 31, 15),
+        "bg": (0, 0, 0),
+        "bar": (0, 0, 0),
         "line": (82, 58, 22),
         "title": (255, 236, 179),
         "text": (255, 213, 128),
+        "cursor": (255, 213, 128),
+        "cursor_text": (0, 0, 0),
     },
 }
 
@@ -188,12 +206,15 @@ Shell
 
 Terminal Keys
   $ctrlc / $ctrl c           send Ctrl+C
+  $ctrlb / $ctrl b           send Ctrl+B, useful for tmux prefix
+  $ctrla / $ctrl a           send Ctrl+A
   $ctrld                     send Ctrl+D
   $ctrlz                     send Ctrl+Z
   $enter                     send Enter
   $tab                       send Tab
   $up / $down / $left / $right
-  $key esc|backspace|delete|home|end|pgup|pgdn
+  $key esc|backspace|delete|home|end|pgup|pgdn|space
+  $key f1..f12               send function keys
 
 Screenshots
   $shot                      screenshot current terminal screen
@@ -204,6 +225,9 @@ Screenshots
   $shot run wide <cmd>       run command with wider screenshot
   $shot run clear <cmd>      run, screenshot, then clear
   $shot run --no-session <cmd>
+  $shot theme [black|green|white|amber]
+  $shot title <text>
+  $tt size [COLSxROWS]       show or resize the pty/screenshot terminal
 
 Buffers
   $buf tail [lines|full]     show session output buffer
@@ -356,8 +380,10 @@ def reset_runtime_state():
     global current_shot_clear_after
     global current_shot_save_path
     global current_shot_wide
+    global current_shot_command
     global current_command_started_at
     global current_command_last_activity
+    global pending_shell_data
     global terminal_waiting_prompt
     global terminal_external_prompt
 
@@ -371,8 +397,10 @@ def reset_runtime_state():
     current_shot_clear_after = False
     current_shot_save_path = None
     current_shot_wide = False
+    current_shot_command = None
     current_command_started_at = None
     current_command_last_activity = None
+    pending_shell_data = ""
     terminal_waiting_prompt = False
     terminal_external_prompt = False
     output_revision += 1
@@ -768,6 +796,40 @@ def reset_terminal_screen():
     terminal_external_prompt = False
 
 
+def resize_terminal(cols, lines):
+    global TERM_COLUMNS
+    global TERM_LINES
+    global terminal_screen
+    global terminal_stream
+
+    cols = max(40, min(240, int(cols)))
+    lines = max(12, min(80, int(lines)))
+    TERM_COLUMNS = cols
+    TERM_LINES = lines
+
+    try:
+        shell.setwinsize(lines, cols)
+    except Exception:
+        pass
+
+    try:
+        terminal_screen.resize(lines, cols)
+    except Exception:
+        terminal_screen = pyte.HistoryScreen(cols, lines, history=TERM_SCROLLBACK)
+        terminal_stream = pyte.Stream(terminal_screen)
+
+    return cols, lines
+
+
+def parse_terminal_size(value):
+    match = re.fullmatch(r"\s*(\d{2,3})\s*[x, ]\s*(\d{2,3})\s*", value)
+
+    if not match:
+        raise ValueError("usage: $tt size COLSxROWS, example: $tt size 120x36")
+
+    return int(match.group(1)), int(match.group(2))
+
+
 def short_cwd(path):
     home = Path.home()
 
@@ -823,71 +885,105 @@ def fallback_text_to_screen(content):
 
 
 
-async def send_terminal_screenshot(event, content, wide=False, save_path=None, use_terminal=True):
+async def send_terminal_screenshot(event, content, wide=False, save_path=None, use_terminal=True, command_line=None):
     try:
-        theme = SHOT_THEMES.get(shot_theme, SHOT_THEMES["green"])
+        theme = SHOT_THEMES.get(shot_theme, SHOT_THEMES["black"])
         screen = terminal_screen
 
         if not use_terminal or not terminal_has_text(screen):
             screen = fallback_text_to_screen(content or "Output buffer is empty.")
 
         cols = screen.columns
-        rendered_rows = screen_rows(screen)
+        all_rows = screen_rows(screen)
         max_rows = SHOT_RENDER_ROWS if wide else min(SHOT_RENDER_ROWS, 64)
-        rendered_rows = rendered_rows[-max_rows:]
-        rows = len(rendered_rows) or screen.lines
+        start_row = max(0, len(all_rows) - max_rows)
+        rendered_rows = all_rows[start_row:]
+        command_line = (command_line or "").strip()
+        rendered_lines = [
+            "".join(getattr(row.get(col), "data", " ") if row.get(col) else " " for col in range(cols)).rstrip()
+            for row in rendered_rows
+        ]
+        command_is_visible = any(line.endswith(f"$ {command_line}") for line in rendered_lines)
+        show_command_header = bool(command_line and not command_is_visible)
+        rows = (len(rendered_rows) or screen.lines) + (1 if show_command_header else 0)
         font_size = 16 if wide else 17
         font = load_terminal_font(font_size)
         title_font = load_terminal_font(16)
         bbox = font_bbox(font, "M")
         cell_width = max(9, bbox[2] - bbox[0] + 1)
         cell_height = max(18, bbox[3] - bbox[1] + 7)
-        pad_x = 28
-        pad_top = 78
-        pad_bottom = 28
-        title_height = 56
+        pad_x = 22 if wide else 26
+        pad_top = 64
+        pad_bottom = 22
+        title_height = 46
         width = pad_x * 2 + cols * cell_width
         height = pad_top + rows * cell_height + pad_bottom
 
         image = Image.new("RGB", (width, height), theme["bg"])
         draw = ImageDraw.Draw(image)
         draw.rectangle((0, 0, width, title_height), fill=theme["bar"])
-        draw.rectangle((0, title_height, width, title_height + 2), fill=theme["line"])
-        draw.ellipse((22, 20, 38, 36), fill=(255, 95, 87))
-        draw.ellipse((50, 20, 66, 36), fill=(255, 189, 46))
-        draw.ellipse((78, 20, 94, 36), fill=(40, 200, 64))
-        draw.text((120, 18), shot_title[:80], fill=theme["title"], font=title_font)
+        draw.rectangle((0, title_height, width, title_height + 1), fill=theme["line"])
+        draw.ellipse((18, 15, 31, 28), fill=(255, 95, 87))
+        draw.ellipse((42, 15, 55, 28), fill=(255, 189, 46))
+        draw.ellipse((66, 15, 79, 28), fill=(40, 200, 64))
+        draw.text((100, 13), shot_title[:100], fill=theme["title"], font=title_font)
+
+        history_len = len(list(getattr(getattr(screen, "history", None), "top", [])))
+        cursor_row = history_len + getattr(screen.cursor, "y", -1)
+        cursor_col = getattr(screen.cursor, "x", -1)
+        visible_cursor_row = cursor_row - start_row + (1 if show_command_header else 0)
+        cursor_visible = 0 <= visible_cursor_row < rows and 0 <= cursor_col < cols
+
+        row_offset = 0
+
+        if show_command_header:
+            user = os.environ.get("USER") or "user"
+            host = socket.gethostname().split(".")[0]
+            prompt_text = f"{user}@{host}:{short_cwd(shell_cwd)}$ "
+            draw.text((pad_x, pad_top), prompt_text[:cols], fill=resolve_terminal_color("brightgreen", theme["text"]), font=font)
+            prompt_width = min(len(prompt_text), cols) * cell_width
+            draw.text((pad_x + prompt_width, pad_top), command_line[:max(0, cols - len(prompt_text))], fill=theme["text"], font=font)
+            row_offset = 1
 
         for row_index, row_data in enumerate(rendered_rows):
-            y = pad_top + row_index * cell_height
+            y = pad_top + (row_index + row_offset) * cell_height
             for col in range(cols):
                 cell = row_data.get(col)
-                if not cell:
-                    continue
+                char = getattr(cell, "data", " ") if cell else " "
 
-                char = getattr(cell, "data", " ") or " "
-                if char == "\x00":
+                if not char or char == "\x00":
                     char = " "
 
                 fg = resolve_terminal_color(getattr(cell, "fg", None), theme["text"])
                 bg = resolve_terminal_color(getattr(cell, "bg", None), theme["bg"])
+                is_cursor = cursor_visible and (row_index + row_offset) == visible_cursor_row and col == cursor_col
 
-                if getattr(cell, "reverse", False):
+                if cell and getattr(cell, "reverse", False):
                     fg, bg = bg, fg
 
-                if getattr(cell, "bold", False):
+                if cell and getattr(cell, "bold", False):
                     fg = brighten(fg)
+
+                if cell and getattr(cell, "dim", False):
+                    fg = tuple(max(0, int(channel * 0.55)) for channel in fg)
+
+                if is_cursor:
+                    bg = theme.get("cursor", theme["text"])
+                    fg = theme.get("cursor_text", theme["bg"])
 
                 x = pad_x + col * cell_width
 
-                if bg != theme["bg"]:
+                if bg != theme["bg"] or is_cursor:
                     draw.rectangle((x, y, x + cell_width, y + cell_height), fill=bg)
 
                 if char != " ":
                     draw.text((x, y), char, fill=fg, font=font)
 
-                if getattr(cell, "underscore", False):
+                if cell and getattr(cell, "underscore", False):
                     draw.line((x, y + cell_height - 3, x + cell_width, y + cell_height - 3), fill=fg)
+
+                if cell and getattr(cell, "strikethrough", False):
+                    draw.line((x, y + cell_height // 2, x + cell_width, y + cell_height // 2), fill=fg)
 
         if save_path:
             image_path = Path(save_path).expanduser()
@@ -1121,6 +1217,7 @@ def restart_shell():
     global terminal_stream
     global terminal_waiting_prompt
     global terminal_external_prompt
+    global pending_shell_data
 
     try:
         if shell.isalive():
@@ -1133,6 +1230,7 @@ def restart_shell():
     terminal_stream = pyte.Stream(terminal_screen)
     terminal_waiting_prompt = False
     terminal_external_prompt = False
+    pending_shell_data = ""
 
 
 async def shell_watchdog():
@@ -1188,15 +1286,49 @@ def is_interactive_shell_command(command):
     if not parts:
         return False
 
-    name = parts[0]
+    name = Path(parts[0]).name
+    full_screen_commands = {
+        "tmux", "screen", "vim", "vi", "nvim", "nano", "micro", "emacs",
+        "less", "more", "man", "top", "htop", "btop", "watch", "ssh",
+        "su", "login", "ftp", "sftp", "mysql", "psql", "sqlite3", "python",
+        "python3", "node", "irb", "php", "lua", "radian", "R",
+    }
+    non_interactive_flags = {"-c", "--command", "--version", "-V", "--help", "-h"}
 
-    if name in {"su", "ssh", "login"}:
-        return True
+    if name == "sudo":
+        if any(arg in {"-i", "-s", "su"} for arg in parts[1:]):
+            return True
 
-    if name == "sudo" and any(arg in {"-i", "-s", "su"} for arg in parts[1:]):
-        return True
+        idx = 1
+        options_with_values = {"-u", "--user", "-g", "--group", "-p", "--prompt", "-C", "--close-from", "-h", "--host"}
 
-    return False
+        while idx < len(parts):
+            arg = parts[idx]
+
+            if arg == "--":
+                idx += 1
+                break
+
+            if arg in options_with_values:
+                idx += 2
+                continue
+
+            if arg.startswith("-"):
+                idx += 1
+                continue
+
+            break
+
+        return idx < len(parts) and is_interactive_shell_command(" ".join(shlex.quote(arg) for arg in parts[idx:]))
+
+    if name == "tmux":
+        detached = {"-d", "detach", "detach-client", "ls", "list-sessions", "kill-session", "kill-server"}
+        return not any(arg in detached for arg in parts[1:])
+
+    if name in {"python", "python3", "node", "php", "lua", "R"}:
+        return not any(arg in non_interactive_flags for arg in parts[1:])
+
+    return name in full_screen_commands
 
 
 def is_shell_exit_command(command):
@@ -1318,8 +1450,10 @@ async def stream_shell_output():
     global current_shot_clear_after
     global current_shot_save_path
     global current_shot_wide
+    global current_shot_command
     global current_command_started_at
     global current_command_last_activity
+    global pending_shell_data
     global terminal_waiting_prompt
     global terminal_external_prompt
 
@@ -1347,12 +1481,23 @@ async def stream_shell_output():
 
                 if data:
 
-                    raw_data = data
                     command_finished = False
 
-                    if DONE_MARKER in raw_data:
-                        raw_data = raw_data.replace(DONE_MARKER, "")
-                        command_finished = True
+                    if current_command_started_at:
+                        pending_shell_data += data
+
+                        if DONE_MARKER in pending_shell_data:
+                            raw_data = pending_shell_data.replace(DONE_MARKER, "", 1)
+                            pending_shell_data = ""
+                            command_finished = True
+                        elif len(pending_shell_data) > MARKER_HOLD_SIZE:
+                            raw_data = pending_shell_data[:-MARKER_HOLD_SIZE]
+                            pending_shell_data = pending_shell_data[-MARKER_HOLD_SIZE:]
+                        else:
+                            continue
+                    else:
+                        raw_data = data
+                        pending_shell_data = ""
 
                     feed_terminal_screen(raw_data)
                     cleaned = clean_output(raw_data)
@@ -1392,6 +1537,7 @@ async def stream_shell_output():
                                         command_output_buffer,
                                         wide=current_shot_wide,
                                         save_path=current_shot_save_path,
+                                        command_line=current_shot_command,
                                     )
 
                                     try:
@@ -1409,6 +1555,7 @@ async def stream_shell_output():
                                     current_shot_clear_after = False
                                     current_shot_save_path = None
                                     current_shot_wide = False
+                                    current_shot_command = None
                                     current_msg = None
                                     current_event = None
                                     command_output_buffer = ""
@@ -1453,6 +1600,7 @@ async def stream_shell_output():
                                 current_output_no_session = False
                                 current_shot_clear_after = False
                                 current_shot_save_path = None
+                                current_shot_command = None
                                 current_command_started_at = None
                                 current_command_last_activity = None
                                 last_text = trimmed
@@ -1528,8 +1676,10 @@ async def shell_handler(event):
     global current_shot_clear_after
     global current_shot_save_path
     global current_shot_wide
+    global current_shot_command
     global current_command_started_at
     global current_command_last_activity
+    global pending_shell_data
     global terminal_waiting_prompt
     global terminal_external_prompt
     global shot_theme
@@ -1558,6 +1708,12 @@ async def shell_handler(event):
         "control d": "ctrld",
         "ctrl z": "ctrlz",
         "control z": "ctrlz",
+        "ctrl b": "ctrlb",
+        "control b": "ctrlb",
+        "ctrl a": "ctrla",
+        "control a": "ctrla",
+        "ctrl l": "ctrll",
+        "control l": "ctrll",
         "seta cima": "up",
         "seta baixo": "down",
         "seta esquerda": "left",
@@ -1602,6 +1758,52 @@ async def shell_handler(event):
         await event.reply(tg_code(about_text()))
         return
 
+    if command_key == "tt size" or command_key.startswith("tt size "):
+        if command_key == "tt size":
+            await event.reply(tg_code(f"Terminal size: {TERM_COLUMNS}x{TERM_LINES}"))
+            return
+
+        try:
+            cols, lines = parse_terminal_size(command.split(maxsplit=2)[2])
+            cols, lines = resize_terminal(cols, lines)
+            reset_terminal_screen()
+            output_revision += 1
+            await event.reply(tg_code(f"Terminal resized: {cols}x{lines}"))
+        except Exception as e:
+            await event.reply(tg_code(str(e)))
+
+        return
+
+    if command_key in {"tt theme", "shot theme"} or command_key.startswith("tt theme ") or command_key.startswith("shot theme "):
+        args = command.split(maxsplit=2)
+
+        if len(args) < 3:
+            names = ", ".join(sorted(SHOT_THEMES))
+            await event.reply(tg_code(f"Current theme: {shot_theme}\nAvailable: {names}"))
+            return
+
+        selected = args[2].strip().lower()
+
+        if selected not in SHOT_THEMES:
+            names = ", ".join(sorted(SHOT_THEMES))
+            await event.reply(tg_code(f"Unknown theme: {selected}\nAvailable: {names}"))
+            return
+
+        shot_theme = selected
+        await event.reply(tg_code(f"Screenshot theme: {shot_theme}"))
+        return
+
+    if command_key in {"tt title", "shot title"} or command_key.startswith("tt title ") or command_key.startswith("shot title "):
+        args = command.split(maxsplit=2)
+
+        if len(args) < 3 or not args[2].strip():
+            await event.reply(tg_code(f"Screenshot title: {shot_title}"))
+            return
+
+        shot_title = args[2].strip()[:100]
+        await event.reply(tg_code(f"Screenshot title: {shot_title}"))
+        return
+
     if command_key == "tt reset" or command_key == "tt cleanup":
         reset_runtime_state()
 
@@ -1633,6 +1835,7 @@ async def shell_handler(event):
         current_output_no_session = False
         current_shot_save_path = None
         current_shot_wide = False
+        current_shot_command = None
 
         while True:
             if run_text.startswith("clear "):
@@ -1662,6 +1865,7 @@ async def shell_handler(event):
         command_key = " ".join(command_key.split())
         command_key = aliases.get(command_key, command_key)
         current_output_mode = "ss"
+        current_shot_command = command
 
     elif command_key == "shot run":
         await event.reply(tg_code("Usage: $shot run <command>"))
@@ -1842,6 +2046,9 @@ async def shell_handler(event):
         "ctrlc": "\x03",
         "ctrld": "\x04",
         "ctrlz": "\x1a",
+        "ctrlb": "\x02",
+        "ctrla": "\x01",
+        "ctrll": "\x0c",
         "tab": "\t",
         "up": "\x1b[A",
         "down": "\x1b[B",
@@ -1857,6 +2064,19 @@ async def shell_handler(event):
         "end": "\x1b[F",
         "pgup": "\x1b[5~",
         "pgdn": "\x1b[6~",
+        "space": " ",
+        "f1": "\x1bOP",
+        "f2": "\x1bOQ",
+        "f3": "\x1bOR",
+        "f4": "\x1bOS",
+        "f5": "\x1b[15~",
+        "f6": "\x1b[17~",
+        "f7": "\x1b[18~",
+        "f8": "\x1b[19~",
+        "f9": "\x1b[20~",
+        "f10": "\x1b[21~",
+        "f11": "\x1b[23~",
+        "f12": "\x1b[24~",
     }
 
     if command_key == "enter":
@@ -1966,12 +2186,19 @@ async def shell_handler(event):
 
             if current_output_mode == "ss":
                 await asyncio.sleep(1)
-                await send_terminal_screenshot(event, command_output_buffer, wide=current_shot_wide, save_path=current_shot_save_path)
+                await send_terminal_screenshot(event, command_output_buffer, wide=current_shot_wide, save_path=current_shot_save_path, command_line=current_shot_command)
+
+                if current_shot_clear_after:
+                    output_buffer = ""
+                    reset_terminal_screen()
+                    output_revision += 1
+
                 current_output_mode = "chat"
                 current_output_no_session = False
                 current_shot_clear_after = False
                 current_shot_save_path = None
                 current_shot_wide = False
+                current_shot_command = None
             else:
                 await event.reply(tg_code("Interactive command sent"))
         except Exception as e:
