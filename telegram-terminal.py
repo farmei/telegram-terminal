@@ -534,6 +534,7 @@ TERMINAL_PALETTE = {
 }
 
 FONT_PATHS = [
+    "assets/fonts/DejaVuSansMono.ttf",
     "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
     "/usr/share/fonts/truetype/liberation2/LiberationMono-Regular.ttf",
