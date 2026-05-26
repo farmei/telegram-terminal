@@ -657,8 +657,11 @@ def reset_terminal_screen():
 def short_cwd(path):
     home = Path.home()
 
+    if path == home:
+        return "~"
+
     try:
-        return "~" + str(path.relative_to(home.parent / home.name)) if path == home else "~/" + str(path.relative_to(home))
+        return "~/" + str(path.relative_to(home))
     except ValueError:
         return str(path)
 
@@ -686,7 +689,8 @@ def feed_terminal_prompt(command):
     user = os.environ.get("USER") or "user"
     host = socket.gethostname().split(".")[0]
     cwd = short_cwd(shell_cwd)
-    prompt = f"\x1b[1;32m{user}@{host}\x1b[0m:\x1b[1;34m{cwd}\x1b[0m$ {command}\r\n"
+    prefix = "\r\n" if terminal_has_text() and getattr(terminal_screen.cursor, "x", 0) else ""
+    prompt = f"{prefix}\x1b[1;32m{user}@{host}\x1b[0m:\x1b[1;34m{cwd}\x1b[0m$ {command}\r\n"
     feed_terminal_screen(prompt)
 
 
