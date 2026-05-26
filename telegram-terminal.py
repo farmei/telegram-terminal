@@ -29,7 +29,7 @@ client = TelegramClient(
 VERSION = "1.2.0"
 BASE_DIR = Path(__file__).resolve().parent
 EDIT_INTERVAL = 3
-MAX_MESSAGE_OUTPUT = 3500
+MAX_MESSAGE_OUTPUT = 3900
 MAX_BUFFER_SIZE = 200000
 TERM_COLUMNS = 160
 TERM_LINES = 44
@@ -169,8 +169,38 @@ def render_terminal_text(text):
     return "\n".join("".join(line).rstrip() for line in lines).rstrip()
 
 
+APT_PROGRESS_RE = re.compile(r"^\s*\d{1,3}%\s+\[")
+TRANSFER_STATUS_RE = re.compile(r"^\s*[\d.]+\s+[KMGTPE]?B/s\s+\d+[smhd]?\s*$", re.IGNORECASE)
+
+
+def compact_live_output(text):
+    compacted = []
+    pending_progress = None
+
+    for line in text.splitlines():
+        stripped = line.strip()
+
+        if TRANSFER_STATUS_RE.match(stripped):
+            continue
+
+        if APT_PROGRESS_RE.match(line):
+            pending_progress = line
+            continue
+
+        if pending_progress:
+            compacted.append(pending_progress)
+            pending_progress = None
+
+        compacted.append(line)
+
+    if pending_progress:
+        compacted.append(pending_progress)
+
+    return "\n".join(compacted).rstrip()
+
+
 def command_message_preview():
-    rendered = render_terminal_text(command_output_buffer)
+    rendered = compact_live_output(render_terminal_text(command_output_buffer))
     return rendered[-MAX_MESSAGE_OUTPUT:] if rendered else ""
 
 def tg_code(text):
