@@ -100,6 +100,53 @@ Install dependencies:
 
 - `pip install -r requirements.txt`
 
+## Termux / Android Setup
+
+Termux can run `telegram-terminal`, but screenshots need Pillow with FreeType support. If Pillow is installed without FreeType, `$shot` can fail with this error:
+
+- `ImportError: cannot import name '_imagingft' from 'PIL'`
+
+For a clean Termux install, install the native libraries before installing Python dependencies:
+
+- `pkg update`
+- `pkg install python git freetype libjpeg-turbo zlib clang make pkg-config`
+- `git clone https://github.com/farmei/telegram-terminal.git`
+- `cd telegram-terminal`
+- `python -m venv remoteenv`
+- `source remoteenv/bin/activate`
+- `pip install --upgrade pip setuptools wheel`
+- `pip install --no-cache-dir -r requirements.txt`
+
+Test whether Pillow can load the bundled monospace font:
+
+```bash
+python - <<'PY'
+from PIL import ImageFont
+font = ImageFont.truetype("assets/fonts/DejaVuSansMono.ttf", 16)
+print("Pillow FreeType OK:", font)
+PY
+```
+
+If the test fails with `_imagingft`, reinstall Pillow after installing FreeType:
+
+- `pkg install freetype libjpeg-turbo zlib`
+- `pip uninstall -y pillow`
+- `pip install --no-cache-dir --force-reinstall pillow`
+
+If it still fails, use Termux's packaged Pillow instead of the pip wheel/build:
+
+- `pip uninstall -y pillow`
+- `deactivate`
+- `pkg install python-pillow`
+
+Then run the bot without the virtual environment, or recreate the environment with access to system site packages:
+
+- `python -m venv --system-site-packages remoteenv`
+- `source remoteenv/bin/activate`
+- `pip install telethon pexpect pyte`
+
+The bot has a fallback for broken TrueType support and will keep running with Pillow's default font, but terminal screenshots may look less aligned until `_imagingft` is available.
+
 ## Telegram API Setup
 
 Get your Telegram API credentials from `https://my.telegram.org/apps`.

@@ -91,6 +91,8 @@ shot_title = "telegram-terminal"
 shell_cwd = Path.cwd()
 terminal_waiting_prompt = False
 started_at = time.time()
+truetype_available = True
+truetype_warning_shown = False
 
 SHELL_WATCHDOG_IDLE_TIMEOUT = 1800
 SHELL_WATCHDOG_POLL_INTERVAL = 10
@@ -563,6 +565,17 @@ FONT_PATHS = [
     "/usr/share/fonts/truetype/liberation2/LiberationMono-Regular.ttf",
 ]
 
+TERMUX_PILLOW_FREETYPE_HELP = (
+    "TrueType fonts unavailable; screenshots will use Pillow's default font.\n"
+    "If you are running this in Termux, install FreeType support and reinstall Pillow:\n"
+    "  pkg install freetype libjpeg-turbo zlib python\n"
+    "  pip uninstall -y pillow\n"
+    "  pip install --no-cache-dir --force-reinstall pillow\n"
+    "If pip still builds Pillow without _imagingft, use Termux's package instead:\n"
+    "  pip uninstall -y pillow\n"
+    "  pkg install python-pillow"
+)
+
 
 def xterm_color(index):
     index = max(0, min(255, int(index)))
@@ -614,14 +627,28 @@ def brighten(color):
 
 
 def load_terminal_font(size):
-    for font_path in FONT_PATHS:
-        if not Path(font_path).is_file():
-            continue
+    global truetype_available
+    global truetype_warning_shown
 
-        try:
-            return ImageFont.truetype(str(font_path), size=size)
-        except Exception as e:
-            print(f"Font load failed ({font_path}): {e}")
+    if truetype_available:
+        for font_path in FONT_PATHS:
+            if not Path(font_path).is_file():
+                continue
+
+            try:
+                return ImageFont.truetype(str(font_path), size=size)
+            except ImportError as e:
+                truetype_available = False
+
+                if not truetype_warning_shown:
+                    print(f"{TERMUX_PILLOW_FREETYPE_HELP}\nOriginal error: {e}")
+                    truetype_warning_shown = True
+
+                break
+            except Exception as e:
+                if not truetype_warning_shown:
+                    print(f"Font load failed ({font_path}); using Pillow default font: {e}")
+                    truetype_warning_shown = True
 
     return ImageFont.load_default()
 
