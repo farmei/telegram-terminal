@@ -130,6 +130,48 @@ def clean_output(text):
     return ansi_escape.sub('', text)
 
 
+def render_terminal_text(text):
+    lines = [[]]
+    col = 0
+
+    for char in text:
+        if char == "\r":
+            lines[-1] = []
+            col = 0
+        elif char == "\n":
+            lines.append([])
+            col = 0
+        elif char == "\b":
+            col = max(0, col - 1)
+        elif char == "\t":
+            spaces = 8 - (col % 8)
+
+            for _ in range(spaces):
+                if col == len(lines[-1]):
+                    lines[-1].append(" ")
+                else:
+                    lines[-1][col] = " "
+
+                col += 1
+        elif char >= " ":
+            line = lines[-1]
+
+            if col > len(line):
+                line.extend(" " for _ in range(col - len(line)))
+
+            if col == len(line):
+                line.append(char)
+            else:
+                line[col] = char
+
+            col += 1
+
+    return "\n".join("".join(line).rstrip() for line in lines).rstrip()
+
+
+def command_message_preview():
+    rendered = render_terminal_text(command_output_buffer)
+    return rendered[-MAX_MESSAGE_OUTPUT:] if rendered else ""
 
 def tg_code(text):
     safe = str(text).replace("```", "`\u200b``")
@@ -1291,7 +1333,7 @@ async def stream_shell_output():
                     now = time.time()
                     current_command_last_activity = now
 
-                    trimmed = command_output_buffer[-MAX_MESSAGE_OUTPUT:]
+                    trimmed = command_message_preview()
 
                     if command_finished:
                         feed_terminal_prompt(newline=False)
