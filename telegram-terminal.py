@@ -680,13 +680,16 @@ def resolve_terminal_color(value, default_color):
     if isinstance(value, int):
         return xterm_color(value)
 
-    name = str(value).lower().replace("-", "")
+    name = str(value).lower().strip().replace("-", "")
 
-    if name.startswith("#") and len(name) == 7:
-        try:
-            return tuple(int(name[i:i + 2], 16) for i in (1, 3, 5))
-        except ValueError:
-            return default_color
+    if name in {"default", ""}:
+        return default_color
+
+    if name.startswith("#"):
+        name = name[1:]
+
+    if len(name) == 6 and all(char in "0123456789abcdef" for char in name):
+        return tuple(int(name[i:i + 2], 16) for i in (0, 2, 4))
 
     if name.startswith("ansi"):
         name = name[4:]
@@ -1277,6 +1280,21 @@ async def shell_watchdog():
             print(f"Watchdog Error: {e}")
 
 
+def command_program_names(command):
+    names = []
+
+    for segment in command.split("|"):
+        try:
+            parts = shlex.split(segment)
+        except ValueError:
+            parts = segment.split()
+
+        if parts:
+            names.append(Path(parts[0]).name)
+
+    return names
+
+
 def is_interactive_shell_command(command):
     try:
         parts = shlex.split(command)
@@ -1291,9 +1309,13 @@ def is_interactive_shell_command(command):
         "tmux", "screen", "vim", "vi", "nvim", "nano", "micro", "emacs",
         "less", "more", "man", "top", "htop", "btop", "watch", "ssh",
         "su", "login", "ftp", "sftp", "mysql", "psql", "sqlite3", "python",
-        "python3", "node", "irb", "php", "lua", "radian", "R",
+        "python3", "node", "irb", "php", "lua", "radian", "R", "cmatrix",
+        "asciiquarium", "cava", "hollywood",
     }
     non_interactive_flags = {"-c", "--command", "--version", "-V", "--help", "-h"}
+
+    if "|" in command and any(program in full_screen_commands for program in command_program_names(command)):
+        return True
 
     if name == "sudo":
         if any(arg in {"-i", "-s", "su"} for arg in parts[1:]):
@@ -1965,9 +1987,22 @@ async def shell_handler(event):
 
     if command_key == "buf clear":
         output_buffer = ""
+        command_output_buffer = ""
+        command_file_output_buffer = ""
+        pending_shell_data = ""
+        current_msg = None
+        current_event = None
+        current_output_mode = "chat"
+        current_output_no_session = False
+        current_shot_clear_after = False
+        current_shot_save_path = None
+        current_shot_wide = False
+        current_shot_command = None
+        current_command_started_at = None
+        current_command_last_activity = None
         reset_terminal_screen()
         output_revision += 1
-        await event.reply(tg_code("Session output buffer cleared."))
+        await event.reply(tg_code("Session output buffer and current command state cleared."))
         return
 
     if command_key.startswith("buf "):
@@ -2090,13 +2125,43 @@ async def shell_handler(event):
 
     if command_key in control_sequences:
         try:
+            interrupted_started_at = current_command_started_at
             shell.send(control_sequences[command_key])
 
-            if command_key == "ctrlc" and current_command_started_at:
+            if command_key == "ctrlc" and interrupted_started_at:
                 await asyncio.sleep(0.2)
 
                 if shell.isalive():
-                    shell.sendline(f"echo {DONE_MARKER}")
+                    shell.sendline(f"printf '\n{DONE_MARKER}\n'")
+
+                await asyncio.sleep(1.0)
+
+                if current_command_started_at == interrupted_started_at:
+                    preview = command_message_preview()
+                    suffix = "\n\nInterrupted."
+
+                    if current_msg:
+                        try:
+                            await current_msg.edit(tg_code((preview + suffix)[-MAX_MESSAGE_OUTPUT:]))
+                        except Exception as e:
+                            print(f"Ctrl+C final edit error: {e}")
+
+                    command_output_buffer = ""
+                    command_file_output_buffer = ""
+                    pending_shell_data = ""
+                    current_msg = None
+                    current_event = None
+                    current_output_mode = "chat"
+                    current_output_no_session = False
+                    current_shot_clear_after = False
+                    current_shot_save_path = None
+                    current_shot_wide = False
+                    current_shot_command = None
+                    current_command_started_at = None
+                    current_command_last_activity = None
+                    terminal_waiting_prompt = False
+                    feed_terminal_prompt(newline=False)
+                    output_revision += 1
 
             print(f"[{current_time}] You Sent {command_key.upper()}")
             await event.reply(tg_code(f"{command_key.upper()} sent"))
