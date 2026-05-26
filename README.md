@@ -21,7 +21,7 @@ A lightweight Telegram-based remote shell for Linux. It provides a persistent `b
 - Screenshot command runner with optional buffer control
 - Topic-safe screenshot replies in forum groups
 - Topic-safe large output file replies in forum groups
-- Screenshot themes, titles, wide mode and file saving
+- Screenshot wide mode and command runner
 - Better screenshots for fullscreen terminal apps such as `htop`, `btop`, `nano` and `vim`
 - Screenshots include the executed command prompt with user, host and directory
 - Session output buffer clearing without interrupting active commands
@@ -116,17 +116,10 @@ These commands use the accumulated output buffer from the current bot session. `
 - `$shot wide`
 - `$shot wide 80`
 - `$shot clear`
-- `$shot file output.png`
-- `$shot title my-server`
-- `$shot theme green`
-- `$shot theme white`
-- `$shot theme amber`
-- `$shot reset`
 - `$shot run neofetch`
 - `$shot run wide btop`
 - `$shot run clear neofetch`
 - `$shot run --no-session neofetch`
-- `$shot run file neofetch.png neofetch`
 - `$shot run ls -la`
 - `$buf send`
 - `$buf send output.txt`
@@ -134,9 +127,9 @@ These commands use the accumulated output buffer from the current bot session. `
 - `$buf clear`
 - `$buf status`
 
-Large command outputs are still sent automatically as `.txt` files when a command finishes.
+Large command outputs are sent automatically as full `.txt` files when a command finishes, and file replies stay in the original topic in forum groups.
 
-`$shot` renders the current xterm-compatible virtual screen, including ANSI colors, cursor movement, clears and fullscreen terminal layouts. Apps like `btop`, `htop`, `nano` and `vim` can now produce a much closer static screenshot, but Telegram still receives a still PNG, not a live updating terminal view.
+`$shot` renders the current xterm-compatible virtual screen, including ANSI colors, cursor movement, clears and fullscreen terminal layouts. `$shot run` appends to the existing virtual screen like a normal terminal; use `$buf clear` or `$shot clear` when you want a clean screen. Apps like `btop`, `htop`, `nano` and `vim` can now produce a much closer static screenshot, but Telegram still receives a still PNG, not a live updating terminal view.
 
 ### Utility Commands
 

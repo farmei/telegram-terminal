@@ -52,6 +52,7 @@ current_event = None
 
 output_buffer = ""
 command_output_buffer = ""
+command_file_output_buffer = ""
 output_revision = 0
 
 editor_state = None
@@ -142,10 +143,6 @@ $buf status            Show output buffer status
 $shot [lines]          Send current terminal screen image
 $shot wide [lines]     Send wider terminal screen image
 $shot clear [lines]    Send image and clear buffer
-$shot file <path.png>  Save and send output image
-$shot title <text>     Set screenshot title
-$shot theme <name>     Set theme: green, white, amber
-$shot reset            Reset screenshot settings
 $shot run <command>    Run command and send output image
 $shot run wide <cmd>   Run command with wider screenshot
 $shot run clear <cmd>  Run, send image, clear buffer
@@ -271,6 +268,7 @@ def reset_runtime_state():
     global current_msg
     global current_event
     global command_output_buffer
+    global command_file_output_buffer
     global output_revision
     global current_log_path
     global current_output_mode
@@ -284,6 +282,7 @@ def reset_runtime_state():
     current_msg = None
     current_event = None
     command_output_buffer = ""
+    command_file_output_buffer = ""
     current_log_path = None
     current_output_mode = "chat"
     current_output_no_session = False
@@ -295,6 +294,26 @@ def reset_runtime_state():
     output_revision += 1
 
 
+def reply_target_id(event):
+    message = getattr(event, "message", event)
+    return getattr(message, "id", None)
+
+
+async def reply_file(event, file_path, message=None):
+    chat_id = getattr(event, "chat_id", None)
+
+    if chat_id is None and hasattr(event, "get_chat"):
+        chat = await event.get_chat()
+        chat_id = getattr(chat, "id", chat)
+
+    await event.client.send_file(
+        chat_id,
+        str(file_path),
+        caption=message,
+        reply_to=reply_target_id(event),
+    )
+
+
 async def send_text_file(event, content, filename="telegram-terminal-output.txt", message="Output attached as text file."):
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".txt", delete=False) as tmp:
         tmp.write(content)
@@ -304,7 +323,7 @@ async def send_text_file(event, content, filename="telegram-terminal-output.txt"
     tmp_path.replace(final_path)
 
     try:
-        await event.reply(message, file=str(final_path))
+        await reply_file(event, final_path, message)
     finally:
         try:
             final_path.unlink()
@@ -717,13 +736,13 @@ async def send_terminal_screenshot(event, content, wide=False, save_path=None, u
         image_path = Path(save_path).expanduser()
         image_path.parent.mkdir(parents=True, exist_ok=True)
         image.save(image_path, "PNG")
-        await event.reply(f"Terminal screenshot saved: {image_path}", file=str(image_path))
+        await reply_file(event, image_path, f"Terminal screenshot saved: {image_path}")
         return
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         image_path = Path(tmp_dir) / "telegram-terminal.png"
         image.save(image_path, "PNG")
-        await event.reply("Terminal screenshot:", file=str(image_path))
+        await reply_file(event, image_path, "Terminal screenshot:")
 
 
 async def handle_editor_command(event, command):
@@ -914,7 +933,7 @@ async def send_file(event, command):
         await event.reply(tg_code(f"File not found: {path}"))
         return True
 
-    await event.reply(file=str(path), message=f"File: {path}")
+    await reply_file(event, path, f"File: {path}")
     return True
 
 
@@ -1075,8 +1094,6 @@ def about_text():
         f"Session buffer: {len(output_buffer)} chars\n"
         f"Last command: {last_command or 'none'}\n"
         f"Logging: {logging}\n"
-        f"Shot theme: {shot_theme}\n"
-        f"Shot title: {shot_title}\n"
         f"Editor: {editor}"
     )
 
@@ -1087,6 +1104,7 @@ async def stream_shell_output():
     global current_event
     global output_buffer
     global command_output_buffer
+    global command_file_output_buffer
     global output_revision
     global current_output_mode
     global current_output_no_session
@@ -1134,6 +1152,7 @@ async def stream_shell_output():
                         output_buffer += cleaned
 
                     command_output_buffer += cleaned
+                    command_file_output_buffer += cleaned
 
                     output_buffer = output_buffer[-MAX_BUFFER_SIZE:]
                     command_output_buffer = command_output_buffer[-MAX_BUFFER_SIZE:]
@@ -1150,7 +1169,7 @@ async def stream_shell_output():
                             try:
 
                                 if current_log_path:
-                                    write_command_log(last_command or "", command_output_buffer, current_log_path)
+                                    write_command_log(last_command or "", command_file_output_buffer, current_log_path)
 
                                 if current_output_mode == "ss":
                                     target_event = current_event or current_msg
@@ -1179,6 +1198,7 @@ async def stream_shell_output():
                                     current_msg = None
                                     current_event = None
                                     command_output_buffer = ""
+                                    command_file_output_buffer = ""
                                     current_command_started_at = None
                                     current_command_last_activity = None
                                     last_text = trimmed
@@ -1188,20 +1208,23 @@ async def stream_shell_output():
                                 if trimmed == last_text:
                                     continue
 
-                                if len(command_output_buffer) > MAX_MESSAGE_OUTPUT:
+                                if len(command_file_output_buffer) > MAX_MESSAGE_OUTPUT:
                                     suffix = "\n\nOutput is large. Sending full output as .txt..."
 
                                     if current_log_path:
                                         suffix += f"\nLog saved: {current_log_path}"
 
-                                    await current_msg.edit(
-                                        tg_code(trimmed + suffix)
-                                    )
+                                    try:
+                                        await current_msg.edit(
+                                            tg_code(trimmed + suffix)
+                                        )
+                                    except Exception as e:
+                                        print(f"Final large-output edit error: {e}")
 
                                     target_event = current_event or current_msg
                                     await send_text_file(
                                         target_event,
-                                        command_output_buffer,
+                                        command_file_output_buffer,
                                         "telegram-terminal-output.txt",
                                         "Full output:"
                                     )
@@ -1214,6 +1237,7 @@ async def stream_shell_output():
                                 current_msg = None
                                 current_event = None
                                 command_output_buffer = ""
+                                command_file_output_buffer = ""
                                 current_output_mode = "chat"
                                 current_output_no_session = False
                                 current_shot_clear_after = False
@@ -1283,6 +1307,7 @@ async def shell_handler(event):
     global current_event
     global output_buffer
     global command_output_buffer
+    global command_file_output_buffer
     global output_revision
     global last_command
     global log_enabled
@@ -1382,40 +1407,6 @@ async def shell_handler(event):
 
         return
 
-    if command_key == "shot reset":
-        shot_theme = "green"
-        shot_title = "telegram-terminal"
-        reset_terminal_screen()
-        await event.reply(tg_code("Screenshot settings reset."))
-        return
-
-    if command_key == "shot theme" or command_key.startswith("shot theme "):
-        theme = command[10:].strip().lower()
-
-        if not theme:
-            await event.reply(tg_code(f"Current theme: {shot_theme}\nAvailable: {', '.join(SHOT_THEMES)}"))
-            return
-
-        if theme not in SHOT_THEMES:
-            await event.reply(tg_code(f"Unknown theme: {theme}\nAvailable: {', '.join(SHOT_THEMES)}"))
-            return
-
-        shot_theme = theme
-        await event.reply(tg_code(f"Screenshot theme set to: {shot_theme}"))
-        return
-
-    if command_key == "shot title" or command_key.startswith("shot title "):
-        title = command[10:].strip()
-
-        if not title:
-            shot_title = "telegram-terminal"
-            await event.reply(tg_code("Screenshot title reset."))
-        else:
-            shot_title = title[:80]
-            await event.reply(tg_code(f"Screenshot title set to: {shot_title}"))
-
-        return
-
     if command.startswith("shot run "):
         run_text = command[9:].strip()
         current_shot_clear_after = False
@@ -1439,17 +1430,6 @@ async def shell_handler(event):
                 run_text = run_text[13:].strip()
                 continue
 
-            if run_text.startswith("file "):
-                parts = run_text.split(maxsplit=2)
-
-                if len(parts) < 3:
-                    await event.reply(tg_code("Usage: $shot run file <path.png> <command>"))
-                    return
-
-                current_shot_save_path = parts[1]
-                run_text = parts[2].strip()
-                continue
-
             break
 
         command = run_text
@@ -1471,7 +1451,6 @@ async def shell_handler(event):
         shot_args = command.split()
         wide = False
         clear_after = False
-        save_path = None
         tail_arg = ""
         idx = 1
 
@@ -1482,14 +1461,7 @@ async def shell_handler(event):
                 wide = True
             elif arg == "clear":
                 clear_after = True
-            elif arg == "file":
-                if idx + 1 >= len(shot_args):
-                    await event.reply(tg_code("Usage: $shot file <path.png> [lines]"))
-                    return
-
-                save_path = shot_args[idx + 1]
-                idx += 1
-            elif arg not in ("run", "theme", "title"):
+            else:
                 tail_arg = arg
 
             idx += 1
@@ -1499,7 +1471,7 @@ async def shell_handler(event):
             event,
             tail_output(tail_arg),
             wide=wide,
-            save_path=save_path,
+            save_path=None,
             use_terminal=use_terminal,
         )
 
@@ -1728,10 +1700,10 @@ async def shell_handler(event):
     command_history[:] = command_history[-200:]
 
     command_output_buffer = ""
+    command_file_output_buffer = ""
     output_revision += 1
     current_event = event
 
-    reset_terminal_screen()
     feed_terminal_prompt(command)
     current_command_started_at = time.time()
     current_command_last_activity = current_command_started_at
