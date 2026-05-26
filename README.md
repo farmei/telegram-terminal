@@ -86,30 +86,15 @@ Send a Telegram document with caption `$ttput /path/to/save/file.txt` to upload 
 
 ## Installation
 
-`telegram-terminal` runs on Linux with Python 3, `bash`, and a few native libraries used by Pillow for terminal screenshots.
+`telegram-terminal` runs on Linux with Python 3 and `bash`.
 
-Install system packages first.
+Before installing the Python dependencies, make sure your system has:
 
-Debian / Ubuntu / Linux Mint:
-
-- `sudo apt update`
-- `sudo apt install git python3 python3-venv python3-pip bash libfreetype6-dev libjpeg-dev zlib1g-dev`
-
-Fedora:
-
-- `sudo dnf install git python3 python3-pip bash freetype-devel libjpeg-turbo-devel zlib-devel`
-
-Arch Linux / Manjaro:
-
-- `sudo pacman -Syu git python python-pip bash freetype2 libjpeg-turbo zlib`
-
-openSUSE:
-
-- `sudo zypper install git python3 python3-pip python3-venv bash freetype2-devel libjpeg8-devel zlib-devel`
-
-Alpine Linux:
-
-- `sudo apk add git python3 py3-pip bash freetype-dev jpeg-dev zlib-dev build-base`
+- `git`
+- Python 3 with `venv` and `pip`
+- `bash`
+- FreeType, JPEG and zlib development libraries for Pillow screenshots
+- C/build tools if your distro builds Pillow from source
 
 Clone the repository:
 
