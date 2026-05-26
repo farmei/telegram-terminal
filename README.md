@@ -86,6 +86,31 @@ Send a Telegram document with caption `$ttput /path/to/save/file.txt` to upload 
 
 ## Installation
 
+`telegram-terminal` runs on Linux with Python 3, `bash`, and a few native libraries used by Pillow for terminal screenshots.
+
+Install system packages first.
+
+Debian / Ubuntu / Linux Mint:
+
+- `sudo apt update`
+- `sudo apt install git python3 python3-venv python3-pip bash libfreetype6-dev libjpeg-dev zlib1g-dev`
+
+Fedora:
+
+- `sudo dnf install git python3 python3-pip bash freetype-devel libjpeg-turbo-devel zlib-devel`
+
+Arch Linux / Manjaro:
+
+- `sudo pacman -Syu git python python-pip bash freetype2 libjpeg-turbo zlib`
+
+openSUSE:
+
+- `sudo zypper install git python3 python3-pip python3-venv bash freetype2-devel libjpeg8-devel zlib-devel`
+
+Alpine Linux:
+
+- `sudo apk add git python3 py3-pip bash freetype-dev jpeg-dev zlib-dev build-base`
+
 Clone the repository:
 
 - `git clone https://github.com/farmei/telegram-terminal.git`
@@ -96,9 +121,25 @@ Create and activate a virtual environment:
 - `python3 -m venv remoteenv`
 - `source remoteenv/bin/activate`
 
-Install dependencies:
+Install Python dependencies:
 
+- `pip install --upgrade pip setuptools wheel`
 - `pip install -r requirements.txt`
+
+Test whether Pillow can load the bundled monospace font used by `$shot`:
+
+```bash
+python - <<'PY'
+from PIL import ImageFont
+font = ImageFont.truetype("assets/fonts/DejaVuSansMono.ttf", 16)
+print("Pillow FreeType OK:", font)
+PY
+```
+
+If the test fails with `_imagingft`, install the FreeType development package for your distro, then reinstall Pillow inside the virtual environment:
+
+- `pip uninstall -y pillow`
+- `pip install --no-cache-dir --force-reinstall pillow`
 
 ## Termux / Android Setup
 
