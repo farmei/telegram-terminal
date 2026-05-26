@@ -27,6 +27,7 @@ client = TelegramClient(
 )
 
 VERSION = "1.2.0"
+BASE_DIR = Path(__file__).resolve().parent
 EDIT_INTERVAL = 3
 MAX_MESSAGE_OUTPUT = 3500
 MAX_BUFFER_SIZE = 200000
@@ -555,6 +556,7 @@ TERMINAL_PALETTE = {
 }
 
 FONT_PATHS = [
+    BASE_DIR / "assets/fonts/DejaVuSansMono.ttf",
     "assets/fonts/DejaVuSansMono.ttf",
     "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
@@ -613,10 +615,26 @@ def brighten(color):
 
 def load_terminal_font(size):
     for font_path in FONT_PATHS:
-        if Path(font_path).is_file():
-            return ImageFont.truetype(font_path, size=size)
+        if not Path(font_path).is_file():
+            continue
+
+        try:
+            return ImageFont.truetype(str(font_path), size=size)
+        except Exception as e:
+            print(f"Font load failed ({font_path}): {e}")
 
     return ImageFont.load_default()
+
+
+def font_bbox(font, text):
+    if hasattr(font, "getbbox"):
+        return font.getbbox(text)
+
+    if hasattr(font, "getsize"):
+        width, height = font.getsize(text)
+        return (0, 0, width, height)
+
+    return (0, 0, 10, 18)
 
 
 def terminal_cell(screen, row, col):
@@ -733,82 +751,85 @@ def fallback_text_to_screen(content):
 
 
 async def send_terminal_screenshot(event, content, wide=False, save_path=None, use_terminal=True):
-    theme = SHOT_THEMES.get(shot_theme, SHOT_THEMES["green"])
+    try:
+        theme = SHOT_THEMES.get(shot_theme, SHOT_THEMES["green"])
+        screen = terminal_screen
 
-    screen = terminal_screen
+        if not use_terminal or not terminal_has_text(screen):
+            screen = fallback_text_to_screen(content or "Output buffer is empty.")
 
-    if not use_terminal or not terminal_has_text(screen):
-        screen = fallback_text_to_screen(content or "Output buffer is empty.")
+        cols = screen.columns
+        rendered_rows = screen_rows(screen)
+        max_rows = SHOT_RENDER_ROWS if wide else min(SHOT_RENDER_ROWS, 64)
+        rendered_rows = rendered_rows[-max_rows:]
+        rows = len(rendered_rows) or screen.lines
+        font_size = 16 if wide else 17
+        font = load_terminal_font(font_size)
+        title_font = load_terminal_font(16)
+        bbox = font_bbox(font, "M")
+        cell_width = max(9, bbox[2] - bbox[0] + 1)
+        cell_height = max(18, bbox[3] - bbox[1] + 7)
+        pad_x = 28
+        pad_top = 78
+        pad_bottom = 28
+        title_height = 56
+        width = pad_x * 2 + cols * cell_width
+        height = pad_top + rows * cell_height + pad_bottom
 
-    cols = screen.columns
-    rendered_rows = screen_rows(screen)
-    max_rows = SHOT_RENDER_ROWS if wide else min(SHOT_RENDER_ROWS, 64)
-    rendered_rows = rendered_rows[-max_rows:]
-    rows = len(rendered_rows) or screen.lines
-    font_size = 16 if wide else 17
-    font = load_terminal_font(font_size)
-    title_font = load_terminal_font(16)
-    bbox = font.getbbox("M")
-    cell_width = max(9, bbox[2] - bbox[0] + 1)
-    cell_height = max(18, bbox[3] - bbox[1] + 7)
-    pad_x = 28
-    pad_top = 78
-    pad_bottom = 28
-    title_height = 56
-    width = pad_x * 2 + cols * cell_width
-    height = pad_top + rows * cell_height + pad_bottom
+        image = Image.new("RGB", (width, height), theme["bg"])
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((0, 0, width, title_height), fill=theme["bar"])
+        draw.rectangle((0, title_height, width, title_height + 2), fill=theme["line"])
+        draw.ellipse((22, 20, 38, 36), fill=(255, 95, 87))
+        draw.ellipse((50, 20, 66, 36), fill=(255, 189, 46))
+        draw.ellipse((78, 20, 94, 36), fill=(40, 200, 64))
+        draw.text((120, 18), shot_title[:80], fill=theme["title"], font=title_font)
 
-    image = Image.new("RGB", (width, height), theme["bg"])
-    draw = ImageDraw.Draw(image)
-    draw.rectangle((0, 0, width, title_height), fill=theme["bar"])
-    draw.rectangle((0, title_height, width, title_height + 2), fill=theme["line"])
-    draw.ellipse((22, 20, 38, 36), fill=(255, 95, 87))
-    draw.ellipse((50, 20, 66, 36), fill=(255, 189, 46))
-    draw.ellipse((78, 20, 94, 36), fill=(40, 200, 64))
-    draw.text((120, 18), shot_title[:80], fill=theme["title"], font=title_font)
+        for row_index, row_data in enumerate(rendered_rows):
+            y = pad_top + row_index * cell_height
+            for col in range(cols):
+                cell = row_data.get(col)
+                if not cell:
+                    continue
 
-    for row_index, row_data in enumerate(rendered_rows):
-        y = pad_top + row_index * cell_height
-        for col in range(cols):
-            cell = row_data.get(col)
-            if not cell:
-                continue
+                char = getattr(cell, "data", " ") or " "
+                if char == "\x00":
+                    char = " "
 
-            char = getattr(cell, "data", " ") or " "
-            if char == "\x00":
-                char = " "
+                fg = resolve_terminal_color(getattr(cell, "fg", None), theme["text"])
+                bg = resolve_terminal_color(getattr(cell, "bg", None), theme["bg"])
 
-            fg = resolve_terminal_color(getattr(cell, "fg", None), theme["text"])
-            bg = resolve_terminal_color(getattr(cell, "bg", None), theme["bg"])
+                if getattr(cell, "reverse", False):
+                    fg, bg = bg, fg
 
-            if getattr(cell, "reverse", False):
-                fg, bg = bg, fg
+                if getattr(cell, "bold", False):
+                    fg = brighten(fg)
 
-            if getattr(cell, "bold", False):
-                fg = brighten(fg)
+                x = pad_x + col * cell_width
 
-            x = pad_x + col * cell_width
+                if bg != theme["bg"]:
+                    draw.rectangle((x, y, x + cell_width, y + cell_height), fill=bg)
 
-            if bg != theme["bg"]:
-                draw.rectangle((x, y, x + cell_width, y + cell_height), fill=bg)
+                if char != " ":
+                    draw.text((x, y), char, fill=fg, font=font)
 
-            if char != " ":
-                draw.text((x, y), char, fill=fg, font=font)
+                if getattr(cell, "underscore", False):
+                    draw.line((x, y + cell_height - 3, x + cell_width, y + cell_height - 3), fill=fg)
 
-            if getattr(cell, "underscore", False):
-                draw.line((x, y + cell_height - 3, x + cell_width, y + cell_height - 3), fill=fg)
+        if save_path:
+            image_path = Path(save_path).expanduser()
+            image_path.parent.mkdir(parents=True, exist_ok=True)
+            image.save(image_path, "PNG")
+            await reply_file(event, image_path, f"Terminal screenshot saved: {image_path}")
+            return
 
-    if save_path:
-        image_path = Path(save_path).expanduser()
-        image_path.parent.mkdir(parents=True, exist_ok=True)
-        image.save(image_path, "PNG")
-        await reply_file(event, image_path, f"Terminal screenshot saved: {image_path}")
-        return
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image_path = Path(tmp_dir) / "telegram-terminal.png"
+            image.save(image_path, "PNG")
+            await reply_file(event, image_path, "Terminal screenshot:")
 
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        image_path = Path(tmp_dir) / "telegram-terminal.png"
-        image.save(image_path, "PNG")
-        await reply_file(event, image_path, "Terminal screenshot:")
+    except Exception as e:
+        await event.reply(tg_code(f"Screenshot Error:\n{type(e).__name__}: {e}"))
 
 
 async def handle_editor_command(event, command):
@@ -1870,7 +1891,7 @@ async def shell_handler(event):
 
 async def main():
 
-    print("Bhai shell is running...")
+    print("telegram-terminal is running.")
 
     asyncio.create_task(
         stream_shell_output()
