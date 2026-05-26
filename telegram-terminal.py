@@ -1738,8 +1738,6 @@ async def shell_handler(event):
         f"You Executed: {command}"
     )
 
-    update_shell_cwd(command)
-
     last_command = command
     command_history.append(command)
     command_history[:] = command_history[-200:]
@@ -1750,6 +1748,7 @@ async def shell_handler(event):
     current_event = event
 
     feed_terminal_prompt(command)
+    update_shell_cwd(command)
     current_command_started_at = time.time()
     current_command_last_activity = current_command_started_at
     current_log_path = create_log_path(command) if log_enabled else None
