@@ -48,6 +48,9 @@ def spawn_shell():
         env={
             **os.environ,
             "TERM": "xterm-256color",
+            "TERM_PROGRAM": "telegram-terminal",
+            "TERM_PROGRAM_VERSION": VERSION,
+            "COLORTERM": "truecolor",
             "PS1": "",
             "PS2": "",
             "PROMPT_COMMAND": "",
@@ -85,6 +88,7 @@ current_command_last_activity = None
 shot_theme = "green"
 shot_title = "telegram-terminal"
 shell_cwd = Path.cwd()
+terminal_waiting_prompt = False
 started_at = time.time()
 
 SHELL_WATCHDOG_IDLE_TIMEOUT = 1800
@@ -160,6 +164,7 @@ Buffers
   $buf tail [lines|full]     show session output buffer
   $buf send [file.txt]       send session buffer as .txt
   $buf save <file.txt>       save session buffer on server
+  $tt save-session [file]    save session buffer on server
   $buf clear                 clear session buffer and shot screen
   $buf status                show buffer status
 
@@ -193,7 +198,9 @@ Bot
   $tt reset                  clear bot runtime state
   $tt version                show version
   $tt ping                   check latency
-  $tt uptime                 show uptime
+  $tt uptime                 show bot and system uptime
+  $tt uptime bot             show bot uptime
+  $tt uptime system          show system uptime
   $tt about                  show summary"""
 
 
@@ -306,6 +313,7 @@ def reset_runtime_state():
     global current_shot_wide
     global current_command_started_at
     global current_command_last_activity
+    global terminal_waiting_prompt
 
     current_msg = None
     current_event = None
@@ -319,6 +327,7 @@ def reset_runtime_state():
     current_shot_wide = False
     current_command_started_at = None
     current_command_last_activity = None
+    terminal_waiting_prompt = False
     output_revision += 1
 
 
@@ -661,9 +670,11 @@ def feed_terminal_screen(data):
 def reset_terminal_screen():
     global terminal_screen
     global terminal_stream
+    global terminal_waiting_prompt
 
     terminal_screen = pyte.HistoryScreen(TERM_COLUMNS, TERM_LINES, history=TERM_SCROLLBACK)
     terminal_stream = pyte.Stream(terminal_screen)
+    terminal_waiting_prompt = False
 
 
 def short_cwd(path):
@@ -697,11 +708,16 @@ def update_shell_cwd(command):
     shell_cwd = target.resolve(strict=False)
 
 
-def feed_terminal_prompt(command="", newline=True):
+def feed_terminal_prompt(command="", newline=True, replace_current=False):
     user = os.environ.get("USER") or "user"
     host = socket.gethostname().split(".")[0]
     cwd = short_cwd(shell_cwd)
-    prefix = "\r\n" if terminal_has_text() and getattr(terminal_screen.cursor, "x", 0) else ""
+
+    if replace_current and terminal_has_text():
+        prefix = "\r\x1b[2K"
+    else:
+        prefix = "\r\n" if terminal_has_text() and getattr(terminal_screen.cursor, "x", 0) else ""
+
     suffix = "\r\n" if newline else ""
     command_text = f" {command}" if command else ""
     prompt = f"{prefix}\x1b[1;32m{user}@{host}\x1b[0m:\x1b[1;34m{cwd}\x1b[0m${command_text}{suffix}"
@@ -1009,6 +1025,7 @@ def restart_shell():
     global shell
     global terminal_screen
     global terminal_stream
+    global terminal_waiting_prompt
 
     try:
         if shell.isalive():
@@ -1019,6 +1036,7 @@ def restart_shell():
     shell = spawn_shell()
     terminal_screen = pyte.HistoryScreen(TERM_COLUMNS, TERM_LINES, history=TERM_SCROLLBACK)
     terminal_stream = pyte.Stream(terminal_screen)
+    terminal_waiting_prompt = False
 
 
 async def shell_watchdog():
@@ -1121,6 +1139,27 @@ def format_duration(seconds):
     return " ".join(parts)
 
 
+def system_uptime():
+    try:
+        uptime_seconds = float(Path("/proc/uptime").read_text().split()[0])
+    except Exception:
+        return "unavailable"
+
+    return format_duration(uptime_seconds)
+
+
+def uptime_text(mode=""):
+    bot = format_duration(time.time() - started_at)
+
+    if mode == "bot":
+        return f"Bot uptime: {bot}"
+
+    if mode in {"system", "sys", "vps"}:
+        return f"System uptime: {system_uptime()}"
+
+    return f"Bot uptime: {bot}\nSystem uptime: {system_uptime()}"
+
+
 def about_text():
     status = "alive" if shell.isalive() else "dead"
     logging = "on" if log_enabled else "off"
@@ -1156,6 +1195,7 @@ async def stream_shell_output():
     global current_shot_wide
     global current_command_started_at
     global current_command_last_activity
+    global terminal_waiting_prompt
 
     last_edit = 0
     last_text = ""
@@ -1207,6 +1247,7 @@ async def stream_shell_output():
 
                     if command_finished:
                         feed_terminal_prompt(newline=False)
+                        terminal_waiting_prompt = True
 
                         if current_msg:
 
@@ -1363,6 +1404,7 @@ async def shell_handler(event):
     global current_shot_wide
     global current_command_started_at
     global current_command_last_activity
+    global terminal_waiting_prompt
     global shot_theme
     global shot_title
 
@@ -1418,8 +1460,15 @@ async def shell_handler(event):
         await msg.edit(tg_code(f"pong {latency}ms"))
         return
 
-    if command_key == "tt uptime":
-        await event.reply(tg_code(format_duration(time.time() - started_at)))
+    if command_key == "tt uptime" or command_key.startswith("tt uptime "):
+        args = command.split(maxsplit=2)
+        mode = args[2].lower() if len(args) > 2 else ""
+
+        if mode and mode not in {"bot", "system", "sys", "vps"}:
+            await event.reply(tg_code("Usage: $tt uptime [bot|system]"))
+            return
+
+        await event.reply(tg_code(uptime_text(mode)))
         return
 
     if command_key == "tt about":
@@ -1562,6 +1611,23 @@ async def shell_handler(event):
         await event.reply(tg_code(f"Output buffer saved: {save_path}"))
         return
 
+    if command_key == "tt save session" or command_key.startswith("tt save session "):
+        args = command.split(maxsplit=2)
+        filename = args[2].strip() if len(args) > 2 else "telegram-terminal-session.txt"
+
+        if not filename.endswith(".txt"):
+            filename += ".txt"
+
+        if not output_buffer:
+            await event.reply(tg_code("Output buffer is empty."))
+            return
+
+        save_path = Path(filename).expanduser()
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        save_path.write_text(output_buffer, encoding="utf-8", errors="replace")
+        await event.reply(tg_code(f"Session saved: {save_path}"))
+        return
+
     if command_key == "buf status":
         await event.reply(tg_code(buffer_status()))
         return
@@ -1678,6 +1744,13 @@ async def shell_handler(event):
     if command_key in control_sequences:
         try:
             shell.send(control_sequences[command_key])
+
+            if command_key == "ctrlc" and current_command_started_at:
+                await asyncio.sleep(0.2)
+
+                if shell.isalive():
+                    shell.sendline(f"echo {DONE_MARKER}")
+
             print(f"[{current_time}] You Sent {command_key.upper()}")
             await event.reply(tg_code(f"{command_key.upper()} sent"))
         except Exception as e:
@@ -1746,7 +1819,8 @@ async def shell_handler(event):
     output_revision += 1
     current_event = event
 
-    feed_terminal_prompt(command)
+    feed_terminal_prompt(command, replace_current=terminal_waiting_prompt)
+    terminal_waiting_prompt = False
     update_shell_cwd(command)
     current_command_started_at = time.time()
     current_command_last_activity = current_command_started_at

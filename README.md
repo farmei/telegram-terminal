@@ -50,6 +50,7 @@ All commands start with `$`. Built-in commands use namespaced prefixes like `tt`
 - `$buf tail`, `$buf tail 200`, `$buf tail full`
 - `$buf send`, `$buf send output.txt`
 - `$buf save output.txt`
+- `$tt save-session`, `$tt save-session session.txt`
 - `$buf clear`, `$buf status`
 
 Large command outputs are sent automatically as full `.txt` files when a command finishes.
@@ -81,7 +82,7 @@ Send a Telegram document with caption `$ttput /path/to/save/file.txt` to upload 
 ### Bot
 
 - `$tt help`, `$tt status`, `$tt restart`, `$tt reset`
-- `$tt version`, `$tt ping`, `$tt uptime`, `$tt about`
+- `$tt version`, `$tt ping`, `$tt uptime`, `$tt uptime bot`, `$tt uptime system`, `$tt about`
 
 ## Installation
 
