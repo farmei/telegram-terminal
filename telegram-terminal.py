@@ -37,15 +37,27 @@ SHOT_RENDER_ROWS = 76
 
 DONE_MARKER = "__TCM_DONE_982741__"
 
-shell = pexpect.spawn(
-    "bash",
-    encoding="utf-8",
-    echo=False,
-    dimensions=(TERM_LINES, TERM_COLUMNS),
-    env={**os.environ, "TERM": "xterm-256color"}
-)
 
-shell.delaybeforesend = 0
+def spawn_shell():
+    child = pexpect.spawn(
+        "bash",
+        ["--noprofile", "--norc", "--noediting"],
+        encoding="utf-8",
+        echo=False,
+        dimensions=(TERM_LINES, TERM_COLUMNS),
+        env={
+            **os.environ,
+            "TERM": "xterm-256color",
+            "PS1": "",
+            "PS2": "",
+            "PROMPT_COMMAND": "",
+        }
+    )
+    child.delaybeforesend = 0
+    return child
+
+
+shell = spawn_shell()
 terminal_screen = pyte.HistoryScreen(TERM_COLUMNS, TERM_LINES, history=TERM_SCROLLBACK)
 terminal_stream = pyte.Stream(terminal_screen)
 
@@ -685,12 +697,14 @@ def update_shell_cwd(command):
     shell_cwd = target.resolve(strict=False)
 
 
-def feed_terminal_prompt(command):
+def feed_terminal_prompt(command="", newline=True):
     user = os.environ.get("USER") or "user"
     host = socket.gethostname().split(".")[0]
     cwd = short_cwd(shell_cwd)
     prefix = "\r\n" if terminal_has_text() and getattr(terminal_screen.cursor, "x", 0) else ""
-    prompt = f"{prefix}\x1b[1;32m{user}@{host}\x1b[0m:\x1b[1;34m{cwd}\x1b[0m$ {command}\r\n"
+    suffix = "\r\n" if newline else ""
+    command_text = f" {command}" if command else ""
+    prompt = f"{prefix}\x1b[1;32m{user}@{host}\x1b[0m:\x1b[1;34m{cwd}\x1b[0m${command_text}{suffix}"
     feed_terminal_screen(prompt)
 
 
@@ -767,15 +781,6 @@ async def send_terminal_screenshot(event, content, wide=False, save_path=None, u
 
             if getattr(cell, "underscore", False):
                 draw.line((x, y + cell_height - 3, x + cell_width, y + cell_height - 3), fill=fg)
-
-    cursor = getattr(screen, "cursor", None)
-    screen_start = max(0, len(rendered_rows) - screen.lines)
-    cursor_row = screen_start + getattr(cursor, "y", 0) if cursor else -1
-
-    if cursor and getattr(cursor, "hidden", False) is False and 0 <= cursor_row < rows:
-        cursor_x = pad_x + min(max(cursor.x, 0), cols - 1) * cell_width
-        cursor_y = pad_top + cursor_row * cell_height
-        draw.rectangle((cursor_x, cursor_y + cell_height - 4, cursor_x + cell_width, cursor_y + cell_height - 2), fill=theme["text"])
 
     if save_path:
         image_path = Path(save_path).expanduser()
@@ -1011,14 +1016,7 @@ def restart_shell():
     except Exception:
         pass
 
-    shell = pexpect.spawn(
-        "bash",
-        encoding="utf-8",
-        echo=False,
-        dimensions=(TERM_LINES, TERM_COLUMNS),
-        env={**os.environ, "TERM": "xterm-256color"}
-    )
-    shell.delaybeforesend = 0
+    shell = spawn_shell()
     terminal_screen = pyte.HistoryScreen(TERM_COLUMNS, TERM_LINES, history=TERM_SCROLLBACK)
     terminal_stream = pyte.Stream(terminal_screen)
 
@@ -1208,6 +1206,7 @@ async def stream_shell_output():
                     trimmed = command_output_buffer[-MAX_MESSAGE_OUTPUT:]
 
                     if command_finished:
+                        feed_terminal_prompt(newline=False)
 
                         if current_msg:
 
