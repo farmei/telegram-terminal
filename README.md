@@ -184,17 +184,18 @@ Steps:
 - Create an application
 - Copy the `api_id` and `api_hash`
 
-Set the credentials in `telegram-terminal.py`:
+Pass the credentials with environment variables when starting the bot:
 
-- `api_id = 123456`
-- `api_hash = "your_api_hash"`
+- `TG_API_ID=123456 TG_API_HASH=your_api_hash python3 telegram-terminal.py`
+
+You can also edit `api_id` and `api_hash` directly in `telegram-terminal.py` if you prefer.
 
 ## Run
 
 Start the bot:
 
 - `source remoteenv/bin/activate`
-- `python3 telegram-terminal.py`
+- `TG_API_ID=123456 TG_API_HASH=your_api_hash python3 telegram-terminal.py`
 
 On the first run, Telegram will ask for login confirmation and create a local session file. After login, send commands from your own Telegram account using the `$` prefix.
 

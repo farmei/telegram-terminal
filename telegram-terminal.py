@@ -17,8 +17,8 @@ from PIL import Image, ImageDraw, ImageFont
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
 
-api_id = 123456
-api_hash = "12344567abcdefghijklmnop"
+api_id = int(os.environ.get("TG_API_ID", "123456"))
+api_hash = os.environ.get("TG_API_HASH", "your_api_hash")
 
 client = TelegramClient(
     "telegram_shell",
