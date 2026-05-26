@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 import re
 import shlex
@@ -9,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 
 import pexpect
+import pyte
+from PIL import Image, ImageDraw, ImageFont
 
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
@@ -26,16 +29,22 @@ VERSION = "1.1.0"
 EDIT_INTERVAL = 3
 MAX_MESSAGE_OUTPUT = 3500
 MAX_BUFFER_SIZE = 200000
+TERM_COLUMNS = 160
+TERM_LINES = 44
 
 DONE_MARKER = "__TCM_DONE_982741__"
 
 shell = pexpect.spawn(
     "bash",
     encoding="utf-8",
-    echo=False
+    echo=False,
+    dimensions=(TERM_LINES, TERM_COLUMNS),
+    env={**os.environ, "TERM": "xterm-256color"}
 )
 
 shell.delaybeforesend = 0
+terminal_screen = pyte.Screen(TERM_COLUMNS, TERM_LINES)
+terminal_stream = pyte.Stream(terminal_screen)
 
 current_msg = None
 current_event = None
@@ -54,6 +63,7 @@ current_output_mode = "chat"
 current_output_no_session = False
 current_shot_clear_after = False
 current_shot_save_path = None
+current_shot_wide = False
 current_command_started_at = None
 current_command_last_activity = None
 shot_theme = "green"
@@ -88,7 +98,7 @@ SHOT_THEMES = {
 }
 
 ansi_escape = re.compile(
-    r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])'
+    r'\x1B(?:\][^\x07]*(?:\x07|\x1B\\)|\[[0-?]*[ -/]*[@-~]|[@-Z\\-_])'
 )
 
 
@@ -127,14 +137,15 @@ $buf send [file.txt]   Send output buffer as .txt
 $buf save <file.txt>   Save output buffer on server
 $buf clear             Clear session output buffer
 $buf status            Show output buffer status
-$shot [lines]          Send output as terminal image
-$shot wide [lines]     Send wider output image
+$shot [lines]          Send current terminal screen image
+$shot wide [lines]     Send wider terminal screen image
 $shot clear [lines]    Send image and clear buffer
 $shot file <path.png>  Save and send output image
 $shot title <text>     Set screenshot title
 $shot theme <name>     Set theme: green, white, amber
 $shot reset            Reset screenshot settings
 $shot run <command>    Run command and send output image
+$shot run wide <cmd>   Run command with wider screenshot
 $shot run clear <cmd>  Run, send image, clear buffer
 $shot run --no-session <cmd> Run without adding output to session buffer
 $cmd history           Show command history
@@ -264,6 +275,7 @@ def reset_runtime_state():
     global current_output_no_session
     global current_shot_clear_after
     global current_shot_save_path
+    global current_shot_wide
     global current_command_started_at
     global current_command_last_activity
 
@@ -275,6 +287,7 @@ def reset_runtime_state():
     current_output_no_session = False
     current_shot_clear_after = False
     current_shot_save_path = None
+    current_shot_wide = False
     current_command_started_at = None
     current_command_last_activity = None
     output_revision += 1
@@ -463,49 +476,215 @@ def draw_text(pixels, width, height, x, y, text, color, scale=2, line_gap=2):
         if cursor_y > height - line_height:
             break
 
+TERMINAL_PALETTE = {
+    "black": (0, 0, 0),
+    "red": (205, 49, 49),
+    "green": (13, 188, 121),
+    "brown": (229, 229, 16),
+    "yellow": (229, 229, 16),
+    "blue": (36, 114, 200),
+    "magenta": (188, 63, 188),
+    "cyan": (17, 168, 205),
+    "white": (229, 229, 229),
+    "brightblack": (102, 102, 102),
+    "brightred": (241, 76, 76),
+    "brightgreen": (35, 209, 139),
+    "brightyellow": (245, 245, 67),
+    "brightblue": (59, 142, 234),
+    "brightmagenta": (214, 112, 214),
+    "brightcyan": (41, 184, 219),
+    "brightwhite": (255, 255, 255),
+}
 
-async def send_terminal_screenshot(event, content, wide=False, save_path=None):
-    if not content.strip():
-        content = "Output buffer is empty."
+FONT_PATHS = [
+    "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    "/usr/share/fonts/truetype/liberation2/LiberationMono-Regular.ttf",
+]
 
+
+def xterm_color(index):
+    index = max(0, min(255, int(index)))
+
+    if index < 16:
+        palette = [
+            (0, 0, 0), (205, 49, 49), (13, 188, 121), (229, 229, 16),
+            (36, 114, 200), (188, 63, 188), (17, 168, 205), (229, 229, 229),
+            (102, 102, 102), (241, 76, 76), (35, 209, 139), (245, 245, 67),
+            (59, 142, 234), (214, 112, 214), (41, 184, 219), (255, 255, 255),
+        ]
+        return palette[index]
+
+    if 16 <= index <= 231:
+        index -= 16
+        r = index // 36
+        g = (index % 36) // 6
+        b = index % 6
+        steps = [0, 95, 135, 175, 215, 255]
+        return (steps[r], steps[g], steps[b])
+
+    shade = 8 + (index - 232) * 10
+    return (shade, shade, shade)
+
+
+def resolve_terminal_color(value, default_color):
+    if value is None:
+        return default_color
+
+    if isinstance(value, int):
+        return xterm_color(value)
+
+    name = str(value).lower().replace("-", "")
+
+    if name.startswith("#") and len(name) == 7:
+        try:
+            return tuple(int(name[i:i + 2], 16) for i in (1, 3, 5))
+        except ValueError:
+            return default_color
+
+    if name.startswith("ansi"):
+        name = name[4:]
+
+    return TERMINAL_PALETTE.get(name) or default_color
+
+
+def brighten(color):
+    return tuple(min(255, int(channel * 1.25) + 18) for channel in color)
+
+
+def load_terminal_font(size):
+    for font_path in FONT_PATHS:
+        if Path(font_path).is_file():
+            return ImageFont.truetype(font_path, size=size)
+
+    return ImageFont.load_default()
+
+
+def terminal_cell(screen, row, col):
+    line = screen.buffer.get(row, {})
+    return line.get(col)
+
+
+def terminal_has_text(screen=None):
+    screen = screen or terminal_screen
+
+    for row in range(screen.lines):
+        for col in range(screen.columns):
+            cell = terminal_cell(screen, row, col)
+            if cell and getattr(cell, "data", " ") != " ":
+                return True
+    return False
+
+
+def terminal_snapshot_lines():
+    return [line.rstrip() for line in terminal_screen.display]
+
+
+def feed_terminal_screen(data):
+    if not data:
+        return
+
+    try:
+        terminal_stream.feed(data)
+    except Exception as e:
+        print(f"Terminal emulator feed error: {e}")
+
+
+def reset_terminal_screen():
+    global terminal_screen
+    global terminal_stream
+
+    terminal_screen = pyte.Screen(TERM_COLUMNS, TERM_LINES)
+    terminal_stream = pyte.Stream(terminal_screen)
+
+
+def fallback_text_to_screen(content):
+    screen = pyte.Screen(TERM_COLUMNS, TERM_LINES)
+    stream = pyte.Stream(screen)
+    stream.feed(clean_output(content).replace("\r", ""))
+    return screen
+
+
+
+async def send_terminal_screenshot(event, content, wide=False, save_path=None, use_terminal=True):
     theme = SHOT_THEMES.get(shot_theme, SHOT_THEMES["green"])
-    content = clean_output(content).replace("\r", "")
 
-    if wide:
-        width = 1800
-        height = 1000
-        max_lines = 50
-        max_cols = 210
-    else:
-        width = 1440
-        height = 900
-        max_lines = 44
-        max_cols = 155
+    screen = terminal_screen
 
-    lines = content.splitlines()[-max_lines:]
-    cropped = [line[:max_cols] for line in lines]
-    content = "\n".join(cropped)
+    if not use_terminal or not terminal_has_text(screen):
+        screen = fallback_text_to_screen(content or "Output buffer is empty.")
 
-    pixels = bytearray(bytes(theme["bg"]) * width * height)
+    cols = screen.columns
+    rows = screen.lines
+    font_size = 16 if wide else 17
+    font = load_terminal_font(font_size)
+    title_font = load_terminal_font(16)
+    bbox = font.getbbox("M")
+    cell_width = max(9, bbox[2] - bbox[0] + 1)
+    cell_height = max(18, bbox[3] - bbox[1] + 7)
+    pad_x = 28
+    pad_top = 78
+    pad_bottom = 28
+    title_height = 56
+    width = pad_x * 2 + cols * cell_width
+    height = pad_top + rows * cell_height + pad_bottom
 
-    draw_rect(pixels, width, height, 0, 0, width, 54, theme["bar"])
-    draw_rect(pixels, width, height, 0, 54, width, 56, theme["line"])
-    draw_circle(pixels, width, height, 30, 27, 8, (255, 95, 87))
-    draw_circle(pixels, width, height, 58, 27, 8, (255, 189, 46))
-    draw_circle(pixels, width, height, 86, 27, 8, (40, 200, 64))
-    draw_text(pixels, width, height, 120, 19, shot_title[:80], theme["title"], scale=2, line_gap=2)
-    draw_text(pixels, width, height, 28, 78, content, theme["text"], scale=2, line_gap=4)
+    image = Image.new("RGB", (width, height), theme["bg"])
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, width, title_height), fill=theme["bar"])
+    draw.rectangle((0, title_height, width, title_height + 2), fill=theme["line"])
+    draw.ellipse((22, 20, 38, 36), fill=(255, 95, 87))
+    draw.ellipse((50, 20, 66, 36), fill=(255, 189, 46))
+    draw.ellipse((78, 20, 94, 36), fill=(40, 200, 64))
+    draw.text((120, 18), shot_title[:80], fill=theme["title"], font=title_font)
+
+    for row in range(rows):
+        y = pad_top + row * cell_height
+        for col in range(cols):
+            cell = terminal_cell(screen, row, col)
+            if not cell:
+                continue
+
+            char = getattr(cell, "data", " ") or " "
+            if char == "\x00":
+                char = " "
+
+            fg = resolve_terminal_color(getattr(cell, "fg", None), theme["text"])
+            bg = resolve_terminal_color(getattr(cell, "bg", None), theme["bg"])
+
+            if getattr(cell, "reverse", False):
+                fg, bg = bg, fg
+
+            if getattr(cell, "bold", False):
+                fg = brighten(fg)
+
+            x = pad_x + col * cell_width
+
+            if bg != theme["bg"]:
+                draw.rectangle((x, y, x + cell_width, y + cell_height), fill=bg)
+
+            if char != " ":
+                draw.text((x, y), char, fill=fg, font=font)
+
+            if getattr(cell, "underscore", False):
+                draw.line((x, y + cell_height - 3, x + cell_width, y + cell_height - 3), fill=fg)
+
+    cursor = getattr(screen, "cursor", None)
+    if cursor and getattr(cursor, "hidden", False) is False:
+        cursor_x = pad_x + min(max(cursor.x, 0), cols - 1) * cell_width
+        cursor_y = pad_top + min(max(cursor.y, 0), rows - 1) * cell_height
+        draw.rectangle((cursor_x, cursor_y + cell_height - 4, cursor_x + cell_width, cursor_y + cell_height - 2), fill=theme["text"])
 
     if save_path:
         image_path = Path(save_path).expanduser()
         image_path.parent.mkdir(parents=True, exist_ok=True)
-        write_png(image_path, width, height, pixels)
+        image.save(image_path, "PNG")
         await event.reply(f"Terminal screenshot saved: {image_path}", file=str(image_path))
         return
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         image_path = Path(tmp_dir) / "telegram-terminal.png"
-        write_png(image_path, width, height, pixels)
+        image.save(image_path, "PNG")
         await event.reply("Terminal screenshot:", file=str(image_path))
 
 
@@ -721,6 +900,8 @@ async def receive_file(event, command):
 
 def restart_shell():
     global shell
+    global terminal_screen
+    global terminal_stream
 
     try:
         if shell.isalive():
@@ -728,8 +909,16 @@ def restart_shell():
     except Exception:
         pass
 
-    shell = pexpect.spawn("bash", encoding="utf-8", echo=False)
+    shell = pexpect.spawn(
+        "bash",
+        encoding="utf-8",
+        echo=False,
+        dimensions=(TERM_LINES, TERM_COLUMNS),
+        env={**os.environ, "TERM": "xterm-256color"}
+    )
     shell.delaybeforesend = 0
+    terminal_screen = pyte.Screen(TERM_COLUMNS, TERM_LINES)
+    terminal_stream = pyte.Stream(terminal_screen)
 
 
 async def shell_watchdog():
@@ -865,6 +1054,7 @@ async def stream_shell_output():
     global current_output_no_session
     global current_shot_clear_after
     global current_shot_save_path
+    global current_shot_wide
     global current_command_started_at
     global current_command_last_activity
 
@@ -892,18 +1082,15 @@ async def stream_shell_output():
 
                 if data:
 
-                    cleaned = clean_output(data)
-
+                    raw_data = data
                     command_finished = False
 
-                    if DONE_MARKER in cleaned:
-
-                        cleaned = cleaned.replace(
-                            DONE_MARKER,
-                            ""
-                        )
-
+                    if DONE_MARKER in raw_data:
+                        raw_data = raw_data.replace(DONE_MARKER, "")
                         command_finished = True
+
+                    feed_terminal_screen(raw_data)
+                    cleaned = clean_output(raw_data)
 
                     if not current_output_no_session:
                         output_buffer += cleaned
@@ -932,6 +1119,7 @@ async def stream_shell_output():
                                     await send_terminal_screenshot(
                                         target_event,
                                         command_output_buffer,
+                                        wide=current_shot_wide,
                                         save_path=current_shot_save_path,
                                     )
 
@@ -942,12 +1130,14 @@ async def stream_shell_output():
 
                                     if current_shot_clear_after:
                                         output_buffer = ""
+                                        reset_terminal_screen()
                                         output_revision += 1
 
                                     current_output_mode = "chat"
                                     current_output_no_session = False
                                     current_shot_clear_after = False
                                     current_shot_save_path = None
+                                    current_shot_wide = False
                                     current_msg = None
                                     current_event = None
                                     command_output_buffer = ""
@@ -1063,6 +1253,7 @@ async def shell_handler(event):
     global current_output_no_session
     global current_shot_clear_after
     global current_shot_save_path
+    global current_shot_wide
     global current_command_started_at
     global current_command_last_activity
     global shot_theme
@@ -1156,6 +1347,7 @@ async def shell_handler(event):
     if command_key == "shot reset":
         shot_theme = "green"
         shot_title = "telegram-terminal"
+        reset_terminal_screen()
         await event.reply(tg_code("Screenshot settings reset."))
         return
 
@@ -1191,11 +1383,17 @@ async def shell_handler(event):
         current_shot_clear_after = False
         current_output_no_session = False
         current_shot_save_path = None
+        current_shot_wide = False
 
         while True:
             if run_text.startswith("clear "):
                 current_shot_clear_after = True
                 run_text = run_text[6:].strip()
+                continue
+
+            if run_text.startswith("wide "):
+                current_shot_wide = True
+                run_text = run_text[5:].strip()
                 continue
 
             if run_text.startswith("--no-session "):
@@ -1258,10 +1456,18 @@ async def shell_handler(event):
 
             idx += 1
 
-        await send_terminal_screenshot(event, tail_output(tail_arg), wide=wide, save_path=save_path)
+        use_terminal = not tail_arg
+        await send_terminal_screenshot(
+            event,
+            tail_output(tail_arg),
+            wide=wide,
+            save_path=save_path,
+            use_terminal=use_terminal,
+        )
 
         if clear_after:
             output_buffer = ""
+            reset_terminal_screen()
             output_revision += 1
 
         return
@@ -1308,6 +1514,7 @@ async def shell_handler(event):
 
     if command_key == "buf clear":
         output_buffer = ""
+        reset_terminal_screen()
         output_revision += 1
         await event.reply(tg_code("Session output buffer cleared."))
         return

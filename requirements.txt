@@ -1,2 +1,4 @@
 telethon
 pexpect
+pyte
+pillow

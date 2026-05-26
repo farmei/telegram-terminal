@@ -16,12 +16,13 @@ A lightweight Telegram-based remote shell for Linux. It provides a persistent `b
 - Shell status, reset and restart commands
 - Command history with rerun support
 - Optional output logging to `logs/`
-- Terminal-style screenshots from command output
+- Xterm-style terminal screenshots with VT100/ANSI screen emulation
 - Run commands directly as terminal screenshots
 - Screenshot command runner with optional buffer control
 - Topic-safe screenshot replies in forum groups
 - Topic-safe large output file replies in forum groups
 - Screenshot themes, titles, wide mode and file saving
+- Better screenshots for fullscreen terminal apps such as `htop`, `btop`, `nano` and `vim`
 - Session output buffer clearing without interrupting active commands
 - Output rendering state reset between commands
 - Session output buffer status
@@ -121,6 +122,7 @@ These commands use the accumulated output buffer from the current bot session. `
 - `$shot theme amber`
 - `$shot reset`
 - `$shot run neofetch`
+- `$shot run wide btop`
 - `$shot run clear neofetch`
 - `$shot run --no-session neofetch`
 - `$shot run file neofetch.png neofetch`
@@ -133,7 +135,7 @@ These commands use the accumulated output buffer from the current bot session. `
 
 Large command outputs are still sent automatically as `.txt` files when a command finishes.
 
-Note: interactive terminal apps such as `btop`, `htop`, `nano`, `vim` and similar fullscreen programs may not render correctly in `$shot`. They are best used with static output commands or `$shot run` on non-interactive commands.
+`$shot` renders the current xterm-compatible virtual screen, including ANSI colors, cursor movement, clears and fullscreen terminal layouts. Apps like `btop`, `htop`, `nano` and `vim` can now produce a much closer static screenshot, but Telegram still receives a still PNG, not a live updating terminal view.
 
 ### Utility Commands
 
