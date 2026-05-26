@@ -2,6 +2,8 @@
 
 A lightweight Telegram-based remote shell for Linux. It provides a persistent `bash` session through Telegram, with live command output, interactive terminal controls, file transfer, and a simple line-based text editor.
 
+![telegram-terminal preview](assets/preview.png)
+
 ## Features
 
 - Persistent shell session using `pexpect`
@@ -36,21 +38,17 @@ A lightweight Telegram-based remote shell for Linux. It provides a persistent `b
 
 All commands start with `$`. Built-in bot commands use namespaced prefixes like `tt`, `buf`, `cmd`, `out` and `shot`, so normal shell commands such as `$tail file.txt`, `$history`, `$nano`, `$log`, `$get` and `$ss` can still run in the terminal.
 
-### Run Shell Commands
+### Shell
 
-- `$pwd`
-- `$ls -la`
-- `$cd /tmp`
-- `$python3 script.py`
+- `$<command>`
+- `$ttinput your text here`
+- `$ttpaste raw text without pressing enter`
 
-### Terminal Controls
+### Terminal Keys
 
 - `$ctrlc`
 - `$ctrl c`
-- `$ctrl-c`
-- `$ctrl+c`
 - `$ctrld`
-- `$ctrl d`
 - `$ctrlz`
 - `$enter`
 - `$tab`
@@ -66,31 +64,44 @@ All commands start with `$`. Built-in bot commands use namespaced prefixes like 
 - `$key pgup`
 - `$key pgdn`
 
-### Send Input
+### Screenshots
 
-- `$ttinput your text here`
-- `$ttpaste raw text without pressing enter`
+- `$shot`
+- `$shot 80`
+- `$shot wide`
+- `$shot wide 80`
+- `$shot clear`
+- `$shot run neofetch`
+- `$shot run wide btop`
+- `$shot run clear neofetch`
+- `$shot run --no-session neofetch`
+- `$shot run ls -la`
 
-### File Download
+`$shot` renders the current xterm-compatible virtual screen with scrollback, including ANSI colors, cursor movement, clears and fullscreen terminal layouts. `$shot run` appends to the existing virtual screen like a normal terminal; use `$buf clear` or `$shot clear` when you want a clean screen.
 
-Send a file from the server to Telegram:
+### Buffers
+
+- `$buf tail`
+- `$buf tail 200`
+- `$buf tail full`
+- `$buf send`
+- `$buf send output.txt`
+- `$buf save output.txt`
+- `$buf clear`
+- `$buf status`
+
+Large command outputs are sent automatically as full `.txt` files when a command finishes, and file replies stay in the original topic in forum groups.
+
+### Files
 
 - `$ttget /path/to/file.txt`
-
-### File Upload
-
-Send a Telegram document with this caption:
-
 - `$ttput /path/to/save/file.txt`
 
-### Text Editor
+Send a Telegram document with caption `$ttput /path/to/save/file.txt` to upload it.
 
-Open a file:
+### Editor
 
 - `$ttedit open file.txt`
-
-Editor commands:
-
 - `$ttedit show`
 - `$ttedit set 3 new content for line 3`
 - `$ttedit insert 3 inserted before line 3`
@@ -104,34 +115,17 @@ Editor commands:
 - `$ttedit save`
 - `$ttedit cancel`
 
-### Session Output
+### History And Logs
 
-These commands use the accumulated output buffer from the current bot session. `$buf clear` clears only the session buffer and does not interrupt a running command:
+- `$cmd history`
+- `$cmd history 50`
+- `$cmd last`
+- `$cmd rerun 3`
+- `$out log on`
+- `$out log off`
+- `$out log status`
 
-- `$buf tail`
-- `$buf tail 200`
-- `$buf tail full`
-- `$shot`
-- `$shot 80`
-- `$shot wide`
-- `$shot wide 80`
-- `$shot clear`
-- `$shot run neofetch`
-- `$shot run wide btop`
-- `$shot run clear neofetch`
-- `$shot run --no-session neofetch`
-- `$shot run ls -la`
-- `$buf send`
-- `$buf send output.txt`
-- `$buf save output.txt`
-- `$buf clear`
-- `$buf status`
-
-Large command outputs are sent automatically as full `.txt` files when a command finishes, and file replies stay in the original topic in forum groups.
-
-`$shot` renders the current xterm-compatible virtual screen with scrollback, including ANSI colors, cursor movement, clears and fullscreen terminal layouts. `$shot run` appends to the existing virtual screen like a normal terminal; use `$buf clear` or `$shot clear` when you want a clean screen. Apps like `btop`, `htop`, `nano` and `vim` can now produce a much closer static screenshot, but Telegram still receives a still PNG, not a live updating terminal view.
-
-### Utility Commands
+### Bot
 
 - `$tt help`
 - `$tt status`
@@ -141,13 +135,6 @@ Large command outputs are sent automatically as full `.txt` files when a command
 - `$tt ping`
 - `$tt uptime`
 - `$tt about`
-- `$cmd history`
-- `$cmd history 50`
-- `$cmd last`
-- `$cmd rerun 3`
-- `$out log on`
-- `$out log off`
-- `$out log status`
 
 ## Installation
 

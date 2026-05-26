@@ -118,57 +118,71 @@ def tg_code(text):
 
 
 def build_help():
-    return """Telegram shell commands:
-$<command>              Run a shell command
-$tt help               Show telegram-terminal help
-$tt status             Show shell/editor status
-$tt restart            Restart the persistent bash session
-$tt version            Show telegram-terminal version
-$tt ping               Check bot latency
-$tt uptime             Show bot uptime
-$tt about              Show bot summary
-$tt reset              Clear bot runtime state
-$ctrlc / $ctrl c       Send Ctrl+C
-$ctrld                  Send Ctrl+D
-$ctrlz                  Send Ctrl+Z
-$enter                  Send Enter
-$tab                    Send Tab
-$up/$down/$left/$right  Send arrow keys
-$key <name>             Send a key: esc, backspace, delete, home, end, pgup, pgdn
-$ttpaste <text>         Paste raw text into the shell
-$ttinput <text>         Send one input line
-$buf tail [lines|full] Show recent output buffer
-$buf send [file.txt]   Send output buffer as .txt
-$buf save <file.txt>   Save output buffer on server
-$buf clear             Clear session output buffer
-$buf status            Show output buffer status
-$shot [lines]          Send current terminal screen image
-$shot wide [lines]     Send wider terminal screen image
-$shot clear [lines]    Send image and clear buffer
-$shot run <command>    Run command and send output image
-$shot run wide <cmd>   Run command with wider screenshot
-$shot run clear <cmd>  Run, send image, clear buffer
-$shot run --no-session <cmd> Run without adding output to session buffer
-$cmd history           Show command history
-$cmd last              Show last shell command
-$cmd rerun N           Run command from history
-$out log on/off/status Save command outputs to logs/
-$ttget <file>          Send a file from the server
-$ttput <path>          Upload document to server
-$ttedit open <file>    Open Telegram text editor
-$ttedit show           Show editor buffer
-$ttedit set N <text>   Replace line N
-$ttedit insert N text  Insert before line N
-$ttedit append <text>  Append a line
-$ttedit delete N[-M]   Delete line or range
-$ttedit undo           Undo editor change
-$ttedit find <text>    Find text in open file
-$ttedit replace old new Replace first match
-$ttedit replace-all old new Replace all matches
-$ttedit save           Save file
-$ttedit cancel         Close editor without saving
+    return """telegram-terminal help
 
-Send a document with caption "$ttput <path>" to upload it."""
+Shell
+  $<command>                 run command in persistent bash
+  $ttinput <text>            send one input line
+  $ttpaste <text>            paste raw text without Enter
+
+Terminal Keys
+  $ctrlc / $ctrl c           send Ctrl+C
+  $ctrld                     send Ctrl+D
+  $ctrlz                     send Ctrl+Z
+  $enter                     send Enter
+  $tab                       send Tab
+  $up / $down / $left / $right
+  $key esc|backspace|delete|home|end|pgup|pgdn
+
+Screenshots
+  $shot                      screenshot current terminal screen
+  $shot 80                   screenshot last 80 text-buffer lines
+  $shot wide                 wider terminal screenshot
+  $shot clear                screenshot, then clear screen/buffer
+  $shot run <cmd>            run command and send screenshot
+  $shot run wide <cmd>       run command with wider screenshot
+  $shot run clear <cmd>      run, screenshot, then clear
+  $shot run --no-session <cmd>
+
+Buffers
+  $buf tail [lines|full]     show session output buffer
+  $buf send [file.txt]       send session buffer as .txt
+  $buf save <file.txt>       save session buffer on server
+  $buf clear                 clear session buffer and shot screen
+  $buf status                show buffer status
+
+Files
+  $ttget <file>              send file from server
+  $ttput <path>              upload attached document to path
+
+Editor
+  $ttedit open <file>        open file
+  $ttedit show               show editor buffer
+  $ttedit set N <text>       replace line N
+  $ttedit insert N <text>    insert before line N
+  $ttedit append <text>      append line
+  $ttedit delete N[-M]       delete line/range
+  $ttedit undo               undo last edit
+  $ttedit find <text>        find text
+  $ttedit replace old new    replace first match
+  $ttedit replace-all old new
+  $ttedit save               save file
+  $ttedit cancel             close editor
+
+History / Logs
+  $cmd history [N]           show command history
+  $cmd last                  show last command
+  $cmd rerun N               rerun command by history number
+  $out log on|off|status     save command outputs to logs/
+
+Bot
+  $tt status                 shell/editor status
+  $tt restart                restart persistent bash
+  $tt reset                  clear bot runtime state
+  $tt version                show version
+  $tt ping                   check latency
+  $tt uptime                 show uptime
+  $tt about                  show summary"""
 
 
 def editor_preview(max_chars=3300):
