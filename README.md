@@ -38,6 +38,7 @@ All commands start with `$`. Built-in commands use namespaced prefixes like `tt`
 - `$shot`, `$shot 80`
 - `$shot wide`, `$shot wide 80`
 - `$shot clear`
+- `$shot live`, `$shot live 10`, `$shot live wide 10`
 - `$shot run neofetch`
 - `$shot run wide btop`
 - `$shot run clear neofetch`

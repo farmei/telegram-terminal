@@ -35,6 +35,10 @@ TERM_COLUMNS = 160
 TERM_LINES = 44
 TERM_SCROLLBACK = 400
 SHOT_RENDER_ROWS = 76
+SHOT_LIVE_SECONDS = 5
+SHOT_LIVE_MAX_SECONDS = 10
+SHOT_LIVE_INTERVAL = 0.2
+SHOT_LIVE_MAX_BYTES = 8 * 1024 * 1024
 
 DONE_MARKER = "__TCM_DONE_982741__"
 MARKER_HOLD_SIZE = len(DONE_MARKER) - 1
@@ -221,6 +225,8 @@ Screenshots
   $shot 80                   screenshot last 80 text-buffer lines
   $shot wide                 wider terminal screenshot
   $shot clear                screenshot, then clear screen/buffer
+  $shot live N               readable animated screenshot, 1-10 seconds
+  $shot live wide N          wider animated screenshot, 1-10 seconds
   $shot run <cmd>            run command and send screenshot
   $shot run wide <cmd>       run command with wider screenshot
   $shot run clear <cmd>      run, screenshot, then clear
@@ -411,7 +417,7 @@ def reply_target_id(event):
     return getattr(message, "id", None)
 
 
-async def reply_file(event, file_path, message=None):
+async def reply_file(event, file_path, message=None, force_document=False):
     chat_id = getattr(event, "chat_id", None)
 
     if chat_id is None and hasattr(event, "get_chat"):
@@ -423,6 +429,7 @@ async def reply_file(event, file_path, message=None):
         str(file_path),
         caption=message,
         reply_to=reply_target_id(event),
+        force_document=force_document,
     )
 
 
@@ -888,105 +895,111 @@ def fallback_text_to_screen(content):
 
 
 
+def render_terminal_image(content, wide=False, use_terminal=True, command_line=None):
+    theme = SHOT_THEMES.get(shot_theme, SHOT_THEMES["black"])
+    screen = terminal_screen
+
+    if not use_terminal or not terminal_has_text(screen):
+        screen = fallback_text_to_screen(content or "Output buffer is empty.")
+
+    cols = screen.columns
+    all_rows = screen_rows(screen)
+    max_rows = SHOT_RENDER_ROWS if wide else min(SHOT_RENDER_ROWS, 64)
+    start_row = max(0, len(all_rows) - max_rows)
+    rendered_rows = all_rows[start_row:]
+    command_line = (command_line or "").strip()
+    rendered_lines = [
+        "".join(getattr(row.get(col), "data", " ") if row.get(col) else " " for col in range(cols)).rstrip()
+        for row in rendered_rows
+    ]
+    command_is_visible = any(line.endswith(f"$ {command_line}") for line in rendered_lines)
+    show_command_header = bool(command_line and not command_is_visible)
+    rows = (len(rendered_rows) or screen.lines) + (1 if show_command_header else 0)
+    font_size = 16 if wide else 17
+    font = load_terminal_font(font_size)
+    title_font = load_terminal_font(16)
+    bbox = font_bbox(font, "M")
+    cell_width = max(9, bbox[2] - bbox[0] + 1)
+    cell_height = max(18, bbox[3] - bbox[1] + 7)
+    pad_x = 22 if wide else 26
+    pad_top = 64
+    pad_bottom = 22
+    title_height = 46
+    width = pad_x * 2 + cols * cell_width
+    height = pad_top + rows * cell_height + pad_bottom
+
+    image = Image.new("RGB", (width, height), theme["bg"])
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, width, title_height), fill=theme["bar"])
+    draw.rectangle((0, title_height, width, title_height + 1), fill=theme["line"])
+    draw.ellipse((18, 15, 31, 28), fill=(255, 95, 87))
+    draw.ellipse((42, 15, 55, 28), fill=(255, 189, 46))
+    draw.ellipse((66, 15, 79, 28), fill=(40, 200, 64))
+    draw.text((100, 13), shot_title[:100], fill=theme["title"], font=title_font)
+
+    history_len = len(list(getattr(getattr(screen, "history", None), "top", [])))
+    cursor_row = history_len + getattr(screen.cursor, "y", -1)
+    cursor_col = getattr(screen.cursor, "x", -1)
+    visible_cursor_row = cursor_row - start_row + (1 if show_command_header else 0)
+    cursor_visible = 0 <= visible_cursor_row < rows and 0 <= cursor_col < cols
+
+    row_offset = 0
+
+    if show_command_header:
+        user = os.environ.get("USER") or "user"
+        host = socket.gethostname().split(".")[0]
+        prompt_text = f"{user}@{host}:{short_cwd(shell_cwd)}$ "
+        draw.text((pad_x, pad_top), prompt_text[:cols], fill=resolve_terminal_color("brightgreen", theme["text"]), font=font)
+        prompt_width = min(len(prompt_text), cols) * cell_width
+        draw.text((pad_x + prompt_width, pad_top), command_line[:max(0, cols - len(prompt_text))], fill=theme["text"], font=font)
+        row_offset = 1
+
+    for row_index, row_data in enumerate(rendered_rows):
+        y = pad_top + (row_index + row_offset) * cell_height
+        for col in range(cols):
+            cell = row_data.get(col)
+            char = getattr(cell, "data", " ") if cell else " "
+
+            if not char or char == "\x00":
+                char = " "
+
+            fg = resolve_terminal_color(getattr(cell, "fg", None), theme["text"])
+            bg = resolve_terminal_color(getattr(cell, "bg", None), theme["bg"])
+            is_cursor = cursor_visible and (row_index + row_offset) == visible_cursor_row and col == cursor_col
+
+            if cell and getattr(cell, "reverse", False):
+                fg, bg = bg, fg
+
+            if cell and getattr(cell, "bold", False):
+                fg = brighten(fg)
+
+            if cell and getattr(cell, "dim", False):
+                fg = tuple(max(0, int(channel * 0.55)) for channel in fg)
+
+            if is_cursor:
+                bg = theme.get("cursor", theme["text"])
+                fg = theme.get("cursor_text", theme["bg"])
+
+            x = pad_x + col * cell_width
+
+            if bg != theme["bg"] or is_cursor:
+                draw.rectangle((x, y, x + cell_width, y + cell_height), fill=bg)
+
+            if char != " ":
+                draw.text((x, y), char, fill=fg, font=font)
+
+            if cell and getattr(cell, "underscore", False):
+                draw.line((x, y + cell_height - 3, x + cell_width, y + cell_height - 3), fill=fg)
+
+            if cell and getattr(cell, "strikethrough", False):
+                draw.line((x, y + cell_height // 2, x + cell_width, y + cell_height // 2), fill=fg)
+
+    return image
+
+
 async def send_terminal_screenshot(event, content, wide=False, save_path=None, use_terminal=True, command_line=None):
     try:
-        theme = SHOT_THEMES.get(shot_theme, SHOT_THEMES["black"])
-        screen = terminal_screen
-
-        if not use_terminal or not terminal_has_text(screen):
-            screen = fallback_text_to_screen(content or "Output buffer is empty.")
-
-        cols = screen.columns
-        all_rows = screen_rows(screen)
-        max_rows = SHOT_RENDER_ROWS if wide else min(SHOT_RENDER_ROWS, 64)
-        start_row = max(0, len(all_rows) - max_rows)
-        rendered_rows = all_rows[start_row:]
-        command_line = (command_line or "").strip()
-        rendered_lines = [
-            "".join(getattr(row.get(col), "data", " ") if row.get(col) else " " for col in range(cols)).rstrip()
-            for row in rendered_rows
-        ]
-        command_is_visible = any(line.endswith(f"$ {command_line}") for line in rendered_lines)
-        show_command_header = bool(command_line and not command_is_visible)
-        rows = (len(rendered_rows) or screen.lines) + (1 if show_command_header else 0)
-        font_size = 16 if wide else 17
-        font = load_terminal_font(font_size)
-        title_font = load_terminal_font(16)
-        bbox = font_bbox(font, "M")
-        cell_width = max(9, bbox[2] - bbox[0] + 1)
-        cell_height = max(18, bbox[3] - bbox[1] + 7)
-        pad_x = 22 if wide else 26
-        pad_top = 64
-        pad_bottom = 22
-        title_height = 46
-        width = pad_x * 2 + cols * cell_width
-        height = pad_top + rows * cell_height + pad_bottom
-
-        image = Image.new("RGB", (width, height), theme["bg"])
-        draw = ImageDraw.Draw(image)
-        draw.rectangle((0, 0, width, title_height), fill=theme["bar"])
-        draw.rectangle((0, title_height, width, title_height + 1), fill=theme["line"])
-        draw.ellipse((18, 15, 31, 28), fill=(255, 95, 87))
-        draw.ellipse((42, 15, 55, 28), fill=(255, 189, 46))
-        draw.ellipse((66, 15, 79, 28), fill=(40, 200, 64))
-        draw.text((100, 13), shot_title[:100], fill=theme["title"], font=title_font)
-
-        history_len = len(list(getattr(getattr(screen, "history", None), "top", [])))
-        cursor_row = history_len + getattr(screen.cursor, "y", -1)
-        cursor_col = getattr(screen.cursor, "x", -1)
-        visible_cursor_row = cursor_row - start_row + (1 if show_command_header else 0)
-        cursor_visible = 0 <= visible_cursor_row < rows and 0 <= cursor_col < cols
-
-        row_offset = 0
-
-        if show_command_header:
-            user = os.environ.get("USER") or "user"
-            host = socket.gethostname().split(".")[0]
-            prompt_text = f"{user}@{host}:{short_cwd(shell_cwd)}$ "
-            draw.text((pad_x, pad_top), prompt_text[:cols], fill=resolve_terminal_color("brightgreen", theme["text"]), font=font)
-            prompt_width = min(len(prompt_text), cols) * cell_width
-            draw.text((pad_x + prompt_width, pad_top), command_line[:max(0, cols - len(prompt_text))], fill=theme["text"], font=font)
-            row_offset = 1
-
-        for row_index, row_data in enumerate(rendered_rows):
-            y = pad_top + (row_index + row_offset) * cell_height
-            for col in range(cols):
-                cell = row_data.get(col)
-                char = getattr(cell, "data", " ") if cell else " "
-
-                if not char or char == "\x00":
-                    char = " "
-
-                fg = resolve_terminal_color(getattr(cell, "fg", None), theme["text"])
-                bg = resolve_terminal_color(getattr(cell, "bg", None), theme["bg"])
-                is_cursor = cursor_visible and (row_index + row_offset) == visible_cursor_row and col == cursor_col
-
-                if cell and getattr(cell, "reverse", False):
-                    fg, bg = bg, fg
-
-                if cell and getattr(cell, "bold", False):
-                    fg = brighten(fg)
-
-                if cell and getattr(cell, "dim", False):
-                    fg = tuple(max(0, int(channel * 0.55)) for channel in fg)
-
-                if is_cursor:
-                    bg = theme.get("cursor", theme["text"])
-                    fg = theme.get("cursor_text", theme["bg"])
-
-                x = pad_x + col * cell_width
-
-                if bg != theme["bg"] or is_cursor:
-                    draw.rectangle((x, y, x + cell_width, y + cell_height), fill=bg)
-
-                if char != " ":
-                    draw.text((x, y), char, fill=fg, font=font)
-
-                if cell and getattr(cell, "underscore", False):
-                    draw.line((x, y + cell_height - 3, x + cell_width, y + cell_height - 3), fill=fg)
-
-                if cell and getattr(cell, "strikethrough", False):
-                    draw.line((x, y + cell_height // 2, x + cell_width, y + cell_height // 2), fill=fg)
+        image = render_terminal_image(content, wide=wide, use_terminal=use_terminal, command_line=command_line)
 
         if save_path:
             image_path = Path(save_path).expanduser()
@@ -1002,6 +1015,75 @@ async def send_terminal_screenshot(event, content, wide=False, save_path=None, u
 
     except Exception as e:
         await event.reply(tg_code(f"Screenshot Error:\n{type(e).__name__}: {e}"))
+
+
+def gif_terminal_frame(image):
+    palette_container = getattr(Image, "Palette", None)
+    palette_mode = getattr(palette_container, "ADAPTIVE", None) if palette_container else None
+    dither_container = getattr(Image, "Dither", None)
+    dither_mode = getattr(dither_container, "NONE", None) if dither_container else None
+
+    if palette_mode is None:
+        palette_mode = Image.ADAPTIVE
+
+    if dither_mode is None:
+        dither_mode = Image.NONE
+
+    frame = image.convert("P", palette=palette_mode, colors=256, dither=dither_mode)
+    frame.info.pop("transparency", None)
+    return frame
+
+
+def save_terminal_live_gif(path, frames, seconds):
+    step = 1
+
+    while True:
+        selected = frames[::step]
+
+        if selected[-1] is not frames[-1]:
+            selected.append(frames[-1])
+
+        frame_duration = max(20, int(seconds * 1000 / len(selected)))
+        gif_frames = [frame if frame.mode == "P" else gif_terminal_frame(frame) for frame in selected]
+        gif_frames[0].save(
+            path,
+            "GIF",
+            save_all=True,
+            append_images=gif_frames[1:],
+            duration=frame_duration,
+            loop=0,
+            optimize=False,
+            disposal=1,
+            transparency=None,
+        )
+
+        if path.stat().st_size <= SHOT_LIVE_MAX_BYTES or len(selected) <= 2:
+            return len(selected), frame_duration
+
+        step *= 2
+
+
+async def send_terminal_live_shot(event, content, seconds=SHOT_LIVE_SECONDS, wide=False, use_terminal=True, command_line=None):
+    try:
+        seconds = max(1, min(SHOT_LIVE_MAX_SECONDS, int(seconds)))
+        frame_count = max(2, int(seconds / SHOT_LIVE_INTERVAL) + 1)
+        frames = []
+
+        for frame_index in range(frame_count):
+            frame = render_terminal_image(content, wide=wide, use_terminal=use_terminal, command_line=command_line)
+            frames.append(gif_terminal_frame(frame))
+
+            if frame_index < frame_count - 1:
+                await asyncio.sleep(SHOT_LIVE_INTERVAL)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image_path = Path(tmp_dir) / "telegram-terminal-live.gif"
+            frame_count, frame_duration = save_terminal_live_gif(image_path, frames, seconds)
+            caption = f"Terminal live shot ({seconds}s, {frame_count} frames):"
+            await reply_file(event, image_path, caption, force_document=True)
+
+    except Exception as e:
+        await event.reply(tg_code(f"Live Shot Error:\n{type(e).__name__}: {e}"))
 
 
 async def handle_editor_command(event, command):
@@ -1897,6 +1979,8 @@ async def shell_handler(event):
         shot_args = command.split()
         wide = False
         clear_after = False
+        live = False
+        live_seconds = SHOT_LIVE_SECONDS
         tail_arg = ""
         idx = 1
 
@@ -1907,19 +1991,33 @@ async def shell_handler(event):
                 wide = True
             elif arg == "clear":
                 clear_after = True
+            elif arg == "live":
+                live = True
+            elif live and arg.isdigit():
+                live_seconds = arg
             else:
                 tail_arg = arg
 
             idx += 1
 
         use_terminal = not tail_arg
-        await send_terminal_screenshot(
-            event,
-            tail_output(tail_arg),
-            wide=wide,
-            save_path=None,
-            use_terminal=use_terminal,
-        )
+
+        if live:
+            await send_terminal_live_shot(
+                event,
+                tail_output(tail_arg),
+                seconds=live_seconds,
+                wide=wide,
+                use_terminal=use_terminal,
+            )
+        else:
+            await send_terminal_screenshot(
+                event,
+                tail_output(tail_arg),
+                wide=wide,
+                save_path=None,
+                use_terminal=use_terminal,
+            )
 
         if clear_after:
             output_buffer = ""
